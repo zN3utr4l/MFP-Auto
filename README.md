@@ -39,19 +39,26 @@ Telegram bot that auto-logs meals on MyFitnessPal based on your eating patterns.
 | `/undo` | Remove last logged entry |
 | `/retry` | Retry failed MFP syncs |
 
-## Deploy to PythonAnywhere (Free)
+## Deployment
 
-1. Sign up at [pythonanywhere.com](https://www.pythonanywhere.com)
-2. Upload project files (or clone from git)
-3. Open a Bash console and install: `pip install -r requirements.txt`
-4. Set environment variables in the "Tasks" tab
-5. Create an "Always-on task": `python /home/yourusername/mfp-auto/main.py`
-6. Renew free tier every 3 months (email reminder sent)
+The bot is deployed on **Render** (free tier) with auto-deploy from GitHub.
+
+**Live URL:** https://mfp-auto.onrender.com
+
+### Deploy your own instance
+
+1. Fork this repo on GitHub
+2. Sign up at [render.com](https://render.com) with your GitHub account
+3. Create a new **Web Service** and connect the repo
+4. Render auto-detects `render.yaml`. Set the environment variables:
+   - `TELEGRAM_BOT_TOKEN` — from BotFather
+   - `ENCRYPTION_KEY` — Fernet key (see Setup step 2)
+5. Click **Create Web Service** — deploys automatically on every push
 
 ## Tech Stack
 
 - Python 3.14
 - python-telegram-bot 22.7
-- python-myfitnesspal 2.1.2
+- cloudscraper + lxml (direct MFP web scraping)
 - SQLite (via aiosqlite)
 - pandas
