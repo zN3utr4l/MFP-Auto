@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import logging
 import os
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
 
 from dotenv import load_dotenv
 load_dotenv()

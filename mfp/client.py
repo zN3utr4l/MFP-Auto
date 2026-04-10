@@ -45,13 +45,28 @@ class MfpClient:
         if self._logged_in:
             return
 
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Step 0: Warm up session — visit login page to get Cloudflare cookies
+        login_page_url = parse.urljoin(self.BASE_URL, "account/login")
+        warmup_resp = self.session.get(login_page_url)
+        logger.info("MFP warmup: status=%s", warmup_resp.status_code)
+
         # Step 1: Get CSRF token (MFP may return 403 but still include the token)
         csrf_url = parse.urljoin(self.BASE_URL, self.CSRF_PATH)
         csrf_resp = self.session.get(csrf_url)
+        logger.info("MFP CSRF: status=%s content-type=%s body=%s",
+                     csrf_resp.status_code,
+                     csrf_resp.headers.get("Content-Type", ""),
+                     csrf_resp.text[:200])
         try:
             csrf_token = csrf_resp.json().get("csrfToken", "")
         except Exception:
-            raise ValueError(f"Could not get CSRF token from MFP (status {csrf_resp.status_code})")
+            raise ValueError(
+                f"Could not get CSRF token from MFP "
+                f"(status {csrf_resp.status_code}, body: {csrf_resp.text[:300]})"
+            )
         if not csrf_token:
             raise ValueError("MFP returned empty CSRF token")
 
@@ -65,12 +80,23 @@ class MfpClient:
             "json": "true",
         }
         login_resp = self.session.post(login_url, data=login_data)
-        login_resp.raise_for_status()
+        logger.info("MFP login: status=%s body=%s",
+                     login_resp.status_code, login_resp.text[:200])
 
-        login_result = login_resp.json()
+        if not login_resp.ok:
+            raise ValueError(
+                f"MFP login request failed (status {login_resp.status_code}, "
+                f"body: {login_resp.text[:300]})"
+            )
+
+        try:
+            login_result = login_resp.json()
+        except Exception:
+            raise ValueError(f"MFP login returned non-JSON: {login_resp.text[:300]}")
+
         login_ok = login_result.get("url")
         if not login_ok or "error" in str(login_ok).lower():
-            raise ValueError(f"MFP login failed for user {self._username}")
+            raise ValueError(f"MFP login failed for user {self._username}: {login_result}")
 
         # Step 3: Get auth token
         auth_url = parse.urljoin(self.BASE_URL, self.AUTH_TOKEN_PATH)
