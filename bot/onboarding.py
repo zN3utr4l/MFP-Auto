@@ -59,8 +59,7 @@ async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     try:
         client = MfpClient(username, password)
-        # Test with today's date
-        await client.get_day(date.today())
+        await client.login()
     except Exception as e:
         await status_msg.edit_text(f"Connection failed: {e}\nPlease check your credentials and try again.")
         return
@@ -105,6 +104,7 @@ async def import_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         from db.database import decrypt_password
         password = decrypt_password(user.mfp_password_encrypted)
         client = MfpClient(user.mfp_username, password)
+        await client.login()
         context.user_data["mfp_client"] = client
 
     await query.edit_message_text(

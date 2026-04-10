@@ -53,6 +53,7 @@ async def _ensure_client(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return None
     password = decrypt_password(user.mfp_password_encrypted)
     client = MfpClient(user.mfp_username, password)
+    await client.login()
     context.user_data["mfp_client"] = client
     return client
 

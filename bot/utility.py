@@ -84,6 +84,7 @@ async def retry_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             return
         password = decrypt_password(user.mfp_password_encrypted)
         client = MfpClient(user.mfp_username, password)
+        await client.login()
         context.user_data["mfp_client"] = client
 
     msg = await update.message.reply_text("Retrying unsynced entries...")
