@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+from dotenv import load_dotenv
+load_dotenv()
 
 from telegram import Update
 from telegram.ext import (
@@ -13,6 +18,25 @@ from telegram.ext import (
 
 from config import DB_PATH, TELEGRAM_BOT_TOKEN
 from db.database import get_db
+
+
+class _HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+    def log_message(self, format, *args):
+        pass  # suppress logs
+
+
+def _start_health_server() -> None:
+    """Start a minimal HTTP server for Render health checks."""
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    print(f"Health check server on port {port}")
 
 
 async def post_init(application: Application) -> None:
@@ -61,6 +85,7 @@ def main() -> None:
     # Free-text search handler (only when user is in search mode)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_text_handler))
 
+    _start_health_server()
     print("Bot starting... Press Ctrl+C to stop.")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 

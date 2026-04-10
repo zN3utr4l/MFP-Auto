@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: mfp-auto-bot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    plan: free
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: PYTHON_VERSION
+        value: "3.14.2"
