@@ -1,38 +1,32 @@
 from __future__ import annotations
 
 import asyncio
-import json
+import logging
 import re
 from datetime import date
 from urllib import parse
 
-import cloudscraper
 import lxml.html
-import requests
+from curl_cffi import requests as curl_requests
+
+logger = logging.getLogger(__name__)
 
 
 class MfpClient:
-    """MFP client with direct email/password login (no browser cookies needed)."""
+    """MFP client with direct email/password login via curl_cffi (bypasses Cloudflare)."""
 
     BASE_URL = "https://www.myfitnesspal.com/"
+    API_URL = "https://api.myfitnesspal.com/"
     CSRF_PATH = "api/auth/csrf"
     LOGIN_PATH = "api/auth/callback/credentials"
     AUTH_TOKEN_PATH = "user/auth_token?refresh=true"
-    DIARY_PATH = "food/diary/{username}?date={date}"
     SEARCH_PATH = "food/search"
     ABBREVIATIONS = {"carbs": "carbohydrates"}
 
     def __init__(self, username: str, password: str) -> None:
         self._username = username
         self._password = password
-        self.session = cloudscraper.create_scraper(sess=requests.Session())
-        self.session.headers.update({
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            )
-        })
+        self.session = curl_requests.Session(impersonate="chrome")
         self._access_token: str | None = None
         self._user_id: str | None = None
         self._effective_username: str | None = None
@@ -45,32 +39,27 @@ class MfpClient:
         if self._logged_in:
             return
 
-        import logging
-        logger = logging.getLogger(__name__)
-
-        # Step 0: Warm up session — visit login page to get Cloudflare cookies
+        # Step 1: Visit login page to establish session cookies
         login_page_url = parse.urljoin(self.BASE_URL, "account/login")
-        warmup_resp = self.session.get(login_page_url)
-        logger.info("MFP warmup: status=%s", warmup_resp.status_code)
+        warmup = self.session.get(login_page_url)
+        logger.info("MFP warmup: status=%s", warmup.status_code)
 
-        # Step 1: Get CSRF token (MFP may return 403 but still include the token)
+        # Step 2: Get CSRF token
         csrf_url = parse.urljoin(self.BASE_URL, self.CSRF_PATH)
         csrf_resp = self.session.get(csrf_url)
-        logger.info("MFP CSRF: status=%s content-type=%s body=%s",
-                     csrf_resp.status_code,
-                     csrf_resp.headers.get("Content-Type", ""),
-                     csrf_resp.text[:200])
+        logger.info("MFP CSRF: status=%s type=%s",
+                     csrf_resp.status_code, csrf_resp.headers.get("content-type", ""))
         try:
             csrf_token = csrf_resp.json().get("csrfToken", "")
         except Exception:
             raise ValueError(
-                f"Could not get CSRF token from MFP "
+                f"Could not parse CSRF response from MFP "
                 f"(status {csrf_resp.status_code}, body: {csrf_resp.text[:300]})"
             )
         if not csrf_token:
             raise ValueError("MFP returned empty CSRF token")
 
-        # Step 2: Login with credentials
+        # Step 3: Login with credentials
         login_url = parse.urljoin(self.BASE_URL, self.LOGIN_PATH)
         login_data = {
             "username": self._username,
@@ -80,48 +69,45 @@ class MfpClient:
             "json": "true",
         }
         login_resp = self.session.post(login_url, data=login_data)
-        logger.info("MFP login: status=%s body=%s",
-                     login_resp.status_code, login_resp.text[:200])
-
-        if not login_resp.ok:
-            raise ValueError(
-                f"MFP login request failed (status {login_resp.status_code}, "
-                f"body: {login_resp.text[:300]})"
-            )
+        logger.info("MFP login: status=%s", login_resp.status_code)
 
         try:
             login_result = login_resp.json()
         except Exception:
-            raise ValueError(f"MFP login returned non-JSON: {login_resp.text[:300]}")
+            raise ValueError(
+                f"MFP login returned non-JSON "
+                f"(status {login_resp.status_code}, body: {login_resp.text[:300]})"
+            )
 
         login_ok = login_result.get("url")
         if not login_ok or "error" in str(login_ok).lower():
-            raise ValueError(f"MFP login failed for user {self._username}: {login_result}")
+            raise ValueError(f"MFP login failed for {self._username}: {login_result}")
 
-        # Step 3: Get auth token
+        # Step 4: Get auth token
         auth_url = parse.urljoin(self.BASE_URL, self.AUTH_TOKEN_PATH)
         auth_resp = self.session.get(auth_url)
-        if not auth_resp.ok or not auth_resp.headers.get("Content-Type", "").startswith("application/json"):
-            raise ValueError("MFP login succeeded but could not get auth token. Check credentials.")
+        if not auth_resp.headers.get("content-type", "").startswith("application/json"):
+            raise ValueError(
+                f"Could not get MFP auth token "
+                f"(status {auth_resp.status_code}, body: {auth_resp.text[:300]})"
+            )
 
         auth_data = auth_resp.json()
         self._access_token = auth_data.get("access_token")
         self._user_id = auth_data.get("user_id")
         self._effective_username = self._username
         self._logged_in = True
+        logger.info("MFP logged in as user_id=%s", self._user_id)
 
-        # Try to get the effective username from user metadata
+        # Try to resolve the effective username (email -> actual username)
         try:
             self._effective_username = self._get_effective_username()
+            logger.info("MFP effective username: %s", self._effective_username)
         except Exception:
             pass
 
     def _get_effective_username(self) -> str:
-        """Get the real username (may differ from login email)."""
-        url = parse.urljoin(
-            "https://api.myfitnesspal.com/",
-            f"/v2/users/{self._user_id}?fields[]=account"
-        )
+        url = parse.urljoin(self.API_URL, f"/v2/users/{self._user_id}?fields[]=account")
         headers = {
             "Authorization": f"Bearer {self._access_token}",
             "mfp-client-id": "mfp-main-js",
@@ -139,21 +125,14 @@ class MfpClient:
     # --- Read diary ---
 
     def get_day_sync(self, target_date: date) -> list[dict]:
-        """Get all meals for a given date. Returns list of {meal_name, entries}."""
         self._ensure_logged_in()
-
         date_str = target_date.strftime("%Y-%m-%d")
-        url = parse.urljoin(
-            self.BASE_URL,
-            f"food/diary/{self._effective_username}?date={date_str}"
-        )
+        url = parse.urljoin(self.BASE_URL, f"food/diary/{self._effective_username}?date={date_str}")
         content = self.session.get(url).content.decode("utf8")
         document = lxml.html.document_fromstring(content)
-
         return self._parse_meals(document)
 
     def _parse_meals(self, document) -> list[dict]:
-        """Parse meal data from the diary HTML page."""
         meals = []
         fields = None
         meal_headers = document.xpath("//tr[@class='meal_header']")
@@ -179,7 +158,6 @@ class MfpClient:
                 if not columns:
                     break
 
-                # Get food name
                 anchor = columns[0].find("a")
                 if anchor is not None and anchor.text:
                     name = anchor.text.strip()
@@ -188,7 +166,6 @@ class MfpClient:
                 else:
                     continue
 
-                # Get nutritional info
                 nutrition = {}
                 for n in range(1, len(columns)):
                     try:
@@ -216,30 +193,24 @@ class MfpClient:
     # --- Search ---
 
     def search_food_sync(self, query: str) -> list[dict]:
-        """Search MFP food database."""
         self._ensure_logged_in()
-
         search_url = parse.urljoin(self.BASE_URL, self.SEARCH_PATH)
-        params = {"search": query}
-        content = self.session.get(search_url, params=params).content.decode("utf8")
+        content = self.session.get(search_url, params={"search": query}).content.decode("utf8")
         document = lxml.html.document_fromstring(content)
 
         results = []
         for item in document.xpath("//li[@class='matched-food']//a"):
             name = item.text_content().strip()
             href = item.get("href", "")
-            # Try to extract food ID from href
             mfp_id = None
             match = re.search(r"/food/item/(\d+)", href)
             if match:
                 mfp_id = int(match.group(1))
             if name:
                 results.append({"name": name, "mfp_id": mfp_id})
-
         return results
 
     def get_food_details_sync(self, mfp_id: int) -> dict | None:
-        """Get details for a specific food item."""
         self._ensure_logged_in()
         try:
             url = parse.urljoin(self.BASE_URL, f"food/item/{mfp_id}")
@@ -253,7 +224,6 @@ class MfpClient:
         return None
 
     def add_entry_sync(self, date_str: str, meal_name: str, food_name: str, mfp_food_id: str) -> bool:
-        """Add a food entry to MFP diary. Placeholder — MFP write API is undocumented."""
         self._ensure_logged_in()
         # TODO: Implement when MFP write API is reverse-engineered
         return True
