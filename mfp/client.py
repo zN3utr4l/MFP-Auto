@@ -45,11 +45,15 @@ class MfpClient:
         if self._logged_in:
             return
 
-        # Step 1: Get CSRF token
+        # Step 1: Get CSRF token (MFP may return 403 but still include the token)
         csrf_url = parse.urljoin(self.BASE_URL, self.CSRF_PATH)
         csrf_resp = self.session.get(csrf_url)
-        csrf_resp.raise_for_status()
-        csrf_token = csrf_resp.json().get("csrfToken", "")
+        try:
+            csrf_token = csrf_resp.json().get("csrfToken", "")
+        except Exception:
+            raise ValueError(f"Could not get CSRF token from MFP (status {csrf_resp.status_code})")
+        if not csrf_token:
+            raise ValueError("MFP returned empty CSRF token")
 
         # Step 2: Login with credentials
         login_url = parse.urljoin(self.BASE_URL, self.LOGIN_PATH)
