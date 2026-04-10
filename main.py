@@ -60,7 +60,7 @@ async def post_shutdown(application: Application) -> None:
 
 def main() -> None:
     from bot.daily import day_command, search_text_handler, slot_callback, today_command, tomorrow_command
-    from bot.onboarding import import_callback, login_command, start_command
+    from bot.onboarding import import_callback, token_command, start_command
     from bot.utility import retry_command, status_command, undo_command
     from bot.week import week_command, week_stop_callback
 
@@ -74,7 +74,7 @@ def main() -> None:
 
     # Command handlers
     application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("login", login_command))
+    application.add_handler(CommandHandler("token", token_command))
     application.add_handler(CommandHandler("today", today_command))
     application.add_handler(CommandHandler("tomorrow", tomorrow_command))
     application.add_handler(CommandHandler("day", day_command))

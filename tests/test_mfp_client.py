@@ -1,4 +1,5 @@
-from unittest.mock import MagicMock, patch
+import json
+from unittest.mock import MagicMock
 from datetime import date
 
 import pytest
@@ -8,57 +9,77 @@ from mfp.client import MfpClient
 
 @pytest.fixture
 def client():
-    """Create an MfpClient without actually logging in."""
-    c = MfpClient("testuser", "testpass")
-    c._logged_in = True
-    c._effective_username = "testuser"
-    c._access_token = "fake-token"
-    c._user_id = "12345"
+    c = MfpClient(access_token="fake-token", user_id="12345")
+    c._username = "testuser"
     return c
 
 
-def test_mfp_client_creation():
-    client = MfpClient("testuser", "testpass")
-    assert client._username == "testuser"
-    assert not client._logged_in
+def test_from_auth_json():
+    auth = json.dumps({"access_token": "tok123", "user_id": "uid456"})
+    client = MfpClient.from_auth_json(auth)
+    assert client._access_token == "tok123"
+    assert client._user_id == "uid456"
 
 
-def test_get_day_parses_html(client):
-    html = """
-    <html><body><table>
-    <tr class="meal_header"><td>Breakfast</td><td>Calories</td><td>Fat</td></tr>
-    <tr><td><a>Oats 80g</a></td><td>300</td><td>5</td></tr>
-    <tr class="total"><td>Totals</td><td>300</td><td>5</td></tr>
-    </table></body></html>
-    """
+def test_get_day_parses_api_response(client):
+    api_response = {
+        "items": [
+            {
+                "type": "diary_meal",
+                "date": "2026-04-09",
+                "diary_meal": "Breakfast",
+                "nutritional_contents": {
+                    "energy": {"unit": "calories", "value": 300.0},
+                    "protein": 10.0,
+                },
+            },
+            {
+                "type": "diary_meal",
+                "date": "2026-04-09",
+                "diary_meal": "Lunch",
+                "nutritional_contents": {
+                    "energy": {"unit": "calories", "value": 500.0},
+                    "protein": 30.0,
+                },
+            },
+        ]
+    }
+
     mock_resp = MagicMock()
-    mock_resp.content = html.encode("utf8")
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = api_response
+    mock_resp.raise_for_status = MagicMock()
     client.session.get = MagicMock(return_value=mock_resp)
 
-    result = client.get_day_sync(date(2026, 4, 10))
-
-    assert len(result) == 1
-    assert result[0]["meal_name"] == "Breakfast"
-    assert result[0]["entries"][0]["name"] == "Oats 80g"
-
-
-def test_get_day_handles_multiple_meals(client):
-    html = """
-    <html><body><table>
-    <tr class="meal_header"><td>Breakfast</td><td>Calories</td></tr>
-    <tr><td><a>Oats</a></td><td>300</td></tr>
-    <tr class="total"><td>Totals</td><td>300</td></tr>
-    <tr class="meal_header"><td>Lunch</td><td>Calories</td></tr>
-    <tr><td><a>Rice</a></td><td>400</td></tr>
-    <tr class="total"><td>Totals</td><td>400</td></tr>
-    </table></body></html>
-    """
-    mock_resp = MagicMock()
-    mock_resp.content = html.encode("utf8")
-    client.session.get = MagicMock(return_value=mock_resp)
-
-    result = client.get_day_sync(date(2026, 4, 10))
+    result = client.get_day_sync(date(2026, 4, 9))
 
     assert len(result) == 2
     assert result[0]["meal_name"] == "Breakfast"
+    assert result[0]["entries"][0]["name"] == "Breakfast (300 cal)"
     assert result[1]["meal_name"] == "Lunch"
+
+
+def test_get_day_skips_empty_meals(client):
+    api_response = {
+        "items": [
+            {
+                "type": "diary_meal",
+                "date": "2026-04-09",
+                "diary_meal": "Breakfast",
+                "nutritional_contents": {
+                    "energy": {"unit": "calories", "value": 0},
+                },
+            },
+        ]
+    }
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = api_response
+    mock_resp.raise_for_status = MagicMock()
+    client.session.get = MagicMock(return_value=mock_resp)
+
+    result = client.get_day_sync(date(2026, 4, 9))
+
+    assert len(result) == 1
+    assert result[0]["entries"] == []  # 0 cal = no entries

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import date, timedelta
 
 from telegram import Update
@@ -12,6 +11,8 @@ from db.models import User
 from engine.pattern_analyzer import analyze_history
 from mfp.client import MfpClient
 from mfp.scraper import scrape_history
+
+TOKEN_URL = "https://www.myfitnesspal.com/user/auth_token?refresh=true"
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -25,55 +26,60 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     await update.message.reply_text(
-        "Hi! To get started, I need your MyFitnessPal credentials.\n\n"
-        "Send them in this format:\n"
-        "`/login your_username your_password`\n\n"
+        "Hi! To connect your MyFitnessPal account:\n\n"
+        "1. Login to myfitnesspal.com in your browser\n"
+        f"2. Visit this URL:\n`{TOKEN_URL}`\n"
+        "3. Copy ALL the text on the page\n"
+        "4. Send it to me with:\n"
+        "`/token paste_here`\n\n"
         "The message will be deleted immediately for security.",
         parse_mode="Markdown",
     )
 
 
-async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def token_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /token command — user provides MFP auth token JSON."""
     db = context.bot_data["db"]
 
-    # Delete the message containing credentials immediately
+    # Delete the message containing the token immediately
     try:
         await update.message.delete()
     except Exception:
         pass
 
-    args = context.args
-    if not args or len(args) < 2:
+    # Get the raw text after /token
+    raw = update.message.text
+    token_json = raw[len("/token"):].strip() if raw else ""
+
+    if not token_json:
         await update.effective_chat.send_message(
-            "Usage: `/login username password`", parse_mode="Markdown"
+            "Usage: `/token <paste the JSON from the auth page>`\n\n"
+            f"Visit this URL while logged in:\n`{TOKEN_URL}`",
+            parse_mode="Markdown",
         )
         return
 
-    username = args[0]
-    password = " ".join(args[1:])  # password may contain spaces
-
-    # Test connection
-    status_msg = await update.effective_chat.send_message(
-        f"Connecting to MFP as {username}..."
-    )
+    status_msg = await update.effective_chat.send_message("Verifying token...")
 
     try:
-        client = MfpClient(username, password)
-        await client.login()
+        client = MfpClient.from_auth_json(token_json)
+        username = await client.validate()
     except Exception as e:
-        await status_msg.edit_text(f"Connection failed: {e}\nPlease check your credentials and try again.")
+        await status_msg.edit_text(
+            f"Token invalid: {e}\n\n"
+            "Make sure you copied the ENTIRE text from the page."
+        )
         return
 
-    # Save user
-    encrypted_pw = encrypt_password(password)
+    # Save user — store the token JSON encrypted
+    encrypted_token = encrypt_password(token_json)
     user = User(
         telegram_user_id=update.effective_user.id,
         mfp_username=username,
-        mfp_password_encrypted=encrypted_pw,
+        mfp_password_encrypted=encrypted_token,
     )
     await save_user(db, user)
 
-    # Store client in user_data for this session
     context.user_data["mfp_client"] = client
 
     await status_msg.edit_text(
@@ -94,17 +100,15 @@ async def import_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     end_date = date.today()
     start_date = end_date - timedelta(days=days)
 
-    # Get or create MFP client
     client = context.user_data.get("mfp_client")
     if not client:
         user = await get_user(db, telegram_user_id)
         if not user:
-            await query.edit_message_text("Please /login first.")
+            await query.edit_message_text("Please /start first.")
             return
         from db.database import decrypt_password
-        password = decrypt_password(user.mfp_password_encrypted)
-        client = MfpClient(user.mfp_username, password)
-        await client.login()
+        token_json = decrypt_password(user.mfp_password_encrypted)
+        client = MfpClient.from_auth_json(token_json)
         context.user_data["mfp_client"] = client
 
     await query.edit_message_text(
@@ -113,7 +117,6 @@ async def import_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     )
 
     async def on_progress(current_date: date, total: int) -> None:
-        # Update message every 10 days to avoid rate limiting
         if (end_date - current_date).days % 10 == 0:
             try:
                 await query.edit_message_text(
@@ -126,10 +129,8 @@ async def import_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         db, client, telegram_user_id, start_date, end_date, on_progress=on_progress
     )
 
-    # Analyze patterns
     pattern_count = await analyze_history(db, telegram_user_id)
 
-    # Mark onboarding done
     user = await get_user(db, telegram_user_id)
     user.onboarding_done = True
     await save_user(db, user)

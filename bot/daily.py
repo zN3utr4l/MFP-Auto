@@ -51,9 +51,8 @@ async def _ensure_client(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not user or not user.onboarding_done:
         await update.message.reply_text("Please /start first to set up your account.")
         return None
-    password = decrypt_password(user.mfp_password_encrypted)
-    client = MfpClient(user.mfp_username, password)
-    await client.login()
+    token_json = decrypt_password(user.mfp_password_encrypted)
+    client = MfpClient.from_auth_json(token_json)
     context.user_data["mfp_client"] = client
     return client
 
