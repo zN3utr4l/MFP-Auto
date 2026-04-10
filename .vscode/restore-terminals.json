@@ -1,0 +1,25 @@
+{
+  "artificialDelayMilliseconds": 100,
+  "keepExistingTerminalsOpen": false,
+  "runOnStartup": true,
+  "terminals": [
+    {
+      "splitTerminals": [
+        {
+          "commands": [],
+          "name": "terminal"
+        }
+      ]
+    },
+    {
+      "splitTerminals": [
+        {
+          "commands": [
+            "claude"
+          ],
+          "name": "claude"
+        }
+      ]
+    }
+  ]
+}
