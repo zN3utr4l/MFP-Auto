@@ -65,3 +65,25 @@ async def test_save_and_get_meal_entries(db):
     entries = await get_meal_entries(db, telegram_user_id=12345, date="2026-04-10", slot="breakfast")
     assert len(entries) == 1
     assert entries[0].food_name == "Oats 80g"
+
+
+def test_encrypt_decrypt_roundtrip(monkeypatch):
+    # Generate a valid Fernet key
+    from cryptography.fernet import Fernet
+    key = Fernet.generate_key().decode()
+    monkeypatch.setenv("ENCRYPTION_KEY", key)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake")
+
+    # Force reimport
+    import importlib
+    import config
+    importlib.reload(config)
+
+    import db.database as dbmod
+    dbmod._fernet = None  # reset cached fernet
+
+    encrypted = dbmod.encrypt_password("mypassword123")
+    assert encrypted != "mypassword123"
+
+    decrypted = dbmod.decrypt_password(encrypted)
+    assert decrypted == "mypassword123"

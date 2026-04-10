@@ -1,8 +1,27 @@
 from __future__ import annotations
 
 import aiosqlite
+from cryptography.fernet import Fernet
 
 from db.models import MealEntry, MealPattern, User, WeekProgress
+
+_fernet: Fernet | None = None
+
+
+def _get_fernet() -> Fernet:
+    global _fernet
+    if _fernet is None:
+        from config import ENCRYPTION_KEY
+        _fernet = Fernet(ENCRYPTION_KEY.encode() if isinstance(ENCRYPTION_KEY, str) else ENCRYPTION_KEY)
+    return _fernet
+
+
+def encrypt_password(plain: str) -> str:
+    return _get_fernet().encrypt(plain.encode()).decode()
+
+
+def decrypt_password(encrypted: str) -> str:
+    return _get_fernet().decrypt(encrypted.encode()).decode()
 
 _CREATE_TABLES = """
 CREATE TABLE IF NOT EXISTS users (
