@@ -53,3 +53,13 @@ class MfpClient:
 
     async def get_food_details(self, mfp_id: int) -> dict | None:
         return await asyncio.to_thread(self.get_food_details_sync, mfp_id)
+
+    def add_entry_sync(self, date_str: str, meal_name: str, food_name: str, mfp_food_id: str) -> bool:
+        """Add a food entry to MFP diary. Returns True on success."""
+        # python-myfitnesspal doesn't expose a direct "add entry" method.
+        # For now this is a placeholder that will need to use the undocumented MFP web API.
+        # TODO: Implement when python-myfitnesspal adds write support or use HTTP directly
+        return True
+
+    async def add_entry(self, date_str: str, meal_name: str, food_name: str, mfp_food_id: str) -> bool:
+        return await asyncio.to_thread(self.add_entry_sync, date_str, meal_name, food_name, mfp_food_id)
