@@ -6,7 +6,9 @@
     {
       "splitTerminals": [
         {
-          "commands": [],
+          "commands": [
+            ".venv\\Scripts\\Activate.ps1"
+          ],
           "name": "terminal"
         }
       ]
