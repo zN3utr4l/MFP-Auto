@@ -48,6 +48,9 @@ async def _check_daily(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 def schedule_reminders(application: Application) -> None:
     """Schedule the daily reminder job."""
+    if application.job_queue is None:
+        logger.warning("JobQueue not available — reminders disabled. Install python-telegram-bot[job-queue]")
+        return
     application.job_queue.run_daily(
         _check_daily,
         time=time(hour=REMINDER_HOUR, minute=0),
