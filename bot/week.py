@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -17,6 +17,18 @@ from db.database import (
 from db.models import WeekProgress
 
 
+def _is_timed_out(wp: WeekProgress) -> bool:
+    """Check if a week progress has been inactive longer than WEEK_TIMEOUT_MINUTES."""
+    try:
+        updated = datetime.fromisoformat(wp.updated_at)
+        if updated.tzinfo is None:
+            updated = updated.replace(tzinfo=UTC)
+        elapsed = (datetime.now(UTC) - updated).total_seconds() / 60
+        return elapsed > WEEK_TIMEOUT_MINUTES
+    except (ValueError, TypeError):
+        return False
+
+
 async def week_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     client = await _ensure_client(update, context)
     if not client:
@@ -28,6 +40,16 @@ async def week_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     # Check for existing in-progress week
     existing = await get_active_week_progress(db, user_id)
+    if existing:
+        # Auto-stop if timed out
+        if _is_timed_out(existing):
+            await update_week_progress(db, existing.id, existing.current_day, "stopped")
+            await update.message.reply_text(
+                f"Previous week plan expired (inactive >{WEEK_TIMEOUT_MINUTES}min).\n"
+                "Starting a new one..."
+            )
+            existing = None
+
     if existing:
         resume_date = date.fromisoformat(existing.current_day)
         context.user_data["week_mode"] = {

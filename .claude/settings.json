@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "FP=$(python -c \"import sys,json; print(json.load(sys.stdin)['tool_input']['file_path'])\"); if echo \"$FP\" | grep -qE '\\.py$'; then python -m ruff format \"$FP\" 2>/dev/null; python -m ruff check --fix \"$FP\" 2>/dev/null; true; fi"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "FP=$(python -c \"import sys,json; print(json.load(sys.stdin)['tool_input']['file_path'])\"); BN=$(basename \"$FP\"); if [ \"$BN\" = \".env\" ]; then echo 'BLOCK: Do not read or modify .env — use .env.example instead' && exit 2; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

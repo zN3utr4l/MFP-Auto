@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 
 
 @dataclass
@@ -12,7 +12,7 @@ class User:
     mfp_password_encrypted: str
     is_premium: bool = False
     onboarding_done: bool = False
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
 @dataclass
@@ -27,7 +27,7 @@ class MealEntry:
     source: str = "bot_confirm"  # mfp_scrape | bot_confirm | bot_search
     synced_to_mfp: bool = False
     id: int | None = None
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
 @dataclass
@@ -40,7 +40,8 @@ class MealPattern:
     weight: float = 1.0
     last_confirmed: str = ""
     id: int | None = None
-    updated_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    serving_info: str = "{}"
 
     def get_food_combo_list(self) -> list[str]:
         return json.loads(self.food_combo)
@@ -56,4 +57,4 @@ class WeekProgress:
     current_day: str  # YYYY-MM-DD
     status: str = "in_progress"  # in_progress | completed | stopped
     id: int | None = None
-    updated_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())

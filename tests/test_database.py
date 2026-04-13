@@ -87,3 +87,30 @@ def test_encrypt_decrypt_roundtrip(monkeypatch):
 
     decrypted = dbmod.decrypt_password(encrypted)
     assert decrypted == "mypassword123"
+
+
+@pytest.mark.asyncio
+async def test_meal_pattern_serving_info(db):
+    import json
+    from db.database import save_meal_pattern, get_meal_patterns
+
+    user = User(telegram_user_id=99999, mfp_username="u", mfp_password_encrypted="e")
+    await save_user(db, user)
+
+    from db.models import MealPattern
+    pattern = MealPattern(
+        telegram_user_id=99999,
+        slot="breakfast",
+        day_type="weekday",
+        food_combo='["Oatmeal"]',
+        mfp_food_ids='["111"]',
+        weight=3.0,
+        serving_info=json.dumps({"serving_size_index": 4, "servings": 0.8, "serving_unit": "g", "nutrition_multiplier": 1.0}),
+    )
+    await save_meal_pattern(db, pattern)
+
+    patterns = await get_meal_patterns(db, 99999, "breakfast", "weekday")
+    assert len(patterns) == 1
+    info = json.loads(patterns[0].serving_info)
+    assert info["servings"] == 0.8
+    assert info["serving_unit"] == "g"

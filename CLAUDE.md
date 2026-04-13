@@ -4,19 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MFP Auto Bot — a Telegram bot that automates meal logging on MyFitnessPal by analyzing the user's eating history to predict recurring meals. Multi-user, supports both MFP Premium and free accounts. Written in Italian-facing UX, English codebase.
-
-Design spec: `docs/specs/design.md`
-Implementation plan: `docs/plans/2026-04-10-mfp-auto-implementation.md`
+MFP Auto Bot — a Telegram bot that automates meal logging on MyFitnessPal by learning eating patterns and predicting recurring meals. Multi-user, tracks macros in real time. English codebase.
 
 ## Tech Stack
 
 - Python 3.14, async throughout
 - python-telegram-bot 22.7 (async long-polling)
-- myfitnesspal 2.1.2 (sync library — all calls via `asyncio.to_thread()`)
+- curl_cffi >=0.15 (Chrome TLS impersonation for MFP API)
 - pandas >=2.2 for pattern analysis
 - aiosqlite >=0.21 for async SQLite
-- cryptography >=44.0 (Fernet encryption for stored MFP credentials)
+- cryptography >=44.0 (Fernet encryption for stored MFP tokens)
+- lxml >=5.0
 
 ## Virtual Environment
 
@@ -41,51 +39,59 @@ pip install -r requirements.txt
 # Run bot
 python main.py
 
+# Run unit tests
+pytest --ignore=tests/test_integration_telegram.py --ignore=tests/test_integration_mfp.py
+
+# Run integration tests (need real tokens in .env)
+pytest tests/test_integration_mfp.py -v -s
+
 # Run all tests
-pytest
-
-# Run a single test file
-pytest tests/test_predictor.py
-
-# Run a specific test
-pytest tests/test_predictor.py::test_predict_day_weekday -v
+pytest -v
 ```
 
 ## Architecture
 
 Three layers, all async, orchestrated from `main.py`:
 
-1. **Bot Engine** (`bot/`) — Telegram handlers, inline keyboards, message formatting. Split by flow:
-   - `onboarding.py` — /start, /login, import range selection, snack mapping wizard
-   - `daily.py` — /today, /tomorrow, /day (single-day slot-by-slot flow)
-   - `week.py` — /week (multi-day sequential wizard with stop/resume)
-   - `utility.py` — /status, /undo, /retry
+1. **Bot Engine** (`bot/`) — Telegram handlers, inline keyboards, message formatting:
+   - `onboarding.py` — /start (step-by-step wizard), /token (auth with immediate message deletion)
+   - `setup.py` — /setup (register foods per slot with serving_size + quantity selection)
+   - `daily.py` — /today, /tomorrow, /day (slot-by-slot with macro tracking after each confirm)
+   - `week.py` — /week (7-day wizard with 30min timeout auto-stop, stop/resume)
+   - `suggest.py` — /suggest (macro-aware food suggestions from user's pattern history)
+   - `utility.py` — /status, /undo, /retry, /macros, /copy, /history
+   - `reminder.py` — daily 21:00 reminder for unfilled slots (JobQueue)
+   - `keyboards.py` — inline button builders (slots, alternatives, serving sizes, quantities)
+   - `messages.py` — formatting (slots, macros summary, history)
 
 2. **Pattern Engine** (`engine/`) — Predicts meals from history:
-   - `pattern_analyzer.py` — computes meal_patterns from meals_history with temporal decay (weight = base * 0.95^weeks)
-   - `predictor.py` — generates predictions per day/slot (>70% confidence = auto-suggest, <70% = show top 3)
-   - `learner.py` — updates pattern weights on confirm/replace/skip
+   - `pattern_analyzer.py` — computes meal_patterns with temporal decay (weight = base * 0.95^weeks)
+   - `predictor.py` — predictions per day/slot with serving_info (>70% = auto-suggest, <70% = top 3)
+   - `learner.py` — updates pattern weights on confirm/replace
 
-3. **MFP Client** (`mfp/`) — Wraps python-myfitnesspal:
-   - `client.py` — get_day(), search_food(), add_entry()
-   - `scraper.py` — iterates date range, populates meals_history (rate-limited: 1 req/sec)
+3. **MFP Client** (`mfp/`) — MFP JSON API via curl_cffi:
+   - `client.py` — validate, get_day, search_food (with serving_sizes + nutrition), add_entry (with servings params), get_nutrient_goals, get_day_totals
+   - `scraper.py` — date range import (rate-limited 1 req/sec)
    - `sync.py` — retry queue for failed MFP writes
 
-**Data layer** (`db/`) — aiosqlite with 4 tables: `users`, `meals_history`, `meal_patterns`, `week_progress`. Models as dataclasses in `models.py`.
+**Data layer** (`db/`) — aiosqlite with 4 tables: `users`, `meals_history`, `meal_patterns` (with serving_info), `week_progress`. Models as dataclasses in `models.py`.
 
 ## Key Design Decisions
 
-- MFP credentials are Fernet-encrypted in SQLite; the `/login` message is deleted immediately from Telegram chat
-- 7 meal slots (breakfast, morning_snack, lunch, afternoon_snack, pre_workout, post_workout, dinner) — maps to MFP's custom meal names
-- Pattern decay uses a ~3-month sliding window: `weight * 0.95^(weeks_elapsed)`
-- Confirmed meals are saved locally even if MFP write fails; `/retry` syncs the backlog
-- The `/week` wizard is resumable — tracks progress in `week_progress` table, auto-saves on 30min inactivity timeout
+- MFP auth tokens are Fernet-encrypted in SQLite; `/token` message is deleted immediately
+- 7 meal slots (breakfast, morning_snack, lunch, afternoon_snack, pre_workout, post_workout, dinner) mapped to MFP meal_positions (0-3)
+- Pattern decay: `weight * 0.95^(weeks_elapsed)`
+- Patterns store serving_info (serving_size_index, servings, unit, nutrition_multiplier)
+- Macro tracking after each confirm — reads goals from `v2/nutrient-goals`, totals from `v2/diary`
+- Token expiration detected in `_ensure_client` — suggests `/token` refresh
+- `/week` wizard auto-stops after 30min inactivity
+- Evening reminder at 21:00 for unfilled slots
 
 ## Environment Variables
 
 - `TELEGRAM_BOT_TOKEN` — from BotFather
-- `ENCRYPTION_KEY` — Fernet key for encrypting MFP credentials in the DB
+- `ENCRYPTION_KEY` — Fernet key for encrypting MFP tokens in DB
 
 ## Deployment
 
-PythonAnywhere free tier — single always-on task running `python main.py`.
+Render — `render.yaml` configured, health check on port 10000.

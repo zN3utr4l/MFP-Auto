@@ -39,7 +39,7 @@ async def scrape_history(
                     slot=slot,
                     food_name=entry_data["name"],
                     quantity=str(entry_data.get("quantity", "")),
-                    mfp_food_id=str(entry_data.get("mfp_id", "")),
+                    mfp_food_id=str(entry_data.get("mfp_id") or ""),
                     source="mfp_scrape",
                     synced_to_mfp=True,
                 )

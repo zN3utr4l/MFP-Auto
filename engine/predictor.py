@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date
 
 import aiosqlite
@@ -44,6 +45,7 @@ async def predict_day(
             "foods": top.get_food_combo_list(),
             "mfp_ids": top.get_mfp_food_ids_list(),
             "pattern_id": top.id,
+            "serving_info": json.loads(top.serving_info),
         }
 
         alternatives = [
@@ -51,6 +53,7 @@ async def predict_day(
                 "foods": p.get_food_combo_list(),
                 "mfp_ids": p.get_mfp_food_ids_list(),
                 "pattern_id": p.id,
+                "serving_info": json.loads(p.serving_info),
             }
             for p in patterns[:MAX_ALTERNATIVES]
         ]

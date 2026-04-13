@@ -12,7 +12,7 @@ from bot.keyboards import (
     slot_keyboard_low,
     slot_keyboard_none,
 )
-from bot.messages import format_day_header, format_day_summary, format_slot_message
+from bot.messages import format_day_header, format_day_summary, format_macro_summary, format_slot_message
 from config import MEAL_SLOTS
 from db.database import (
     decrypt_password,
@@ -28,6 +28,31 @@ from mfp.client import MfpClient
 
 DAY_NAMES = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+async def _send_macro_update(update: Update, context: ContextTypes.DEFAULT_TYPE, target_date: date) -> None:
+    """Fetch current day totals from MFP and show macro progress vs goals."""
+    client = context.user_data.get("mfp_client")
+    if not client:
+        return
+    try:
+        # Cache goals in user_data (they rarely change)
+        goals = context.user_data.get("macro_goals")
+        if not goals:
+            goals = await client.get_nutrient_goals()
+            if goals:
+                context.user_data["macro_goals"] = goals
+
+        totals = await client.get_day_totals(target_date)
+        summary = format_macro_summary(totals, goals)
+        if summary:
+            await update.effective_chat.send_message(summary)
+    except Exception:
+        logger.debug("Could not fetch macro update", exc_info=True)
+
 
 def _get_target_date(day_name: str) -> date:
     """Get the next occurrence of the given day name."""
@@ -42,7 +67,7 @@ def _get_target_date(day_name: str) -> date:
 
 
 async def _ensure_client(update: Update, context: ContextTypes.DEFAULT_TYPE) -> MfpClient | None:
-    """Get or create MFP client. Returns None if not logged in."""
+    """Get or create MFP client. Returns None if not logged in or token expired."""
     client = context.user_data.get("mfp_client")
     if client:
         return client
@@ -53,6 +78,14 @@ async def _ensure_client(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return None
     token_json = decrypt_password(user.mfp_password_encrypted)
     client = MfpClient.from_auth_json(token_json)
+    try:
+        await client.validate()
+    except Exception:
+        await update.message.reply_text(
+            "Your MFP token has expired.\n"
+            "Please refresh it with /token"
+        )
+        return None
     context.user_data["mfp_client"] = client
     return client
 
@@ -188,8 +221,12 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     if action == "confirm":
         pattern_id = int(parts[2])
-        foods = prediction.get("top", {}).get("foods", [])
-        mfp_ids = prediction.get("top", {}).get("mfp_ids", [])
+        top = prediction.get("top", {})
+        foods = top.get("foods", [])
+        mfp_ids = top.get("mfp_ids", [])
+        si = top.get("serving_info", {})
+        servings_val = si.get("servings", 1.0)
+        ss_index = si.get("serving_size_index")
 
         # Save to history
         parsed_date = date.fromisoformat(target_date)
@@ -211,7 +248,8 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             client = context.user_data.get("mfp_client")
             if client:
                 try:
-                    await client.add_entry(target_date, slot, food, str(mfp_id))
+                    await client.add_entry(target_date, slot, food, str(mfp_id),
+                                           servings=servings_val, serving_size_index=ss_index)
                     await mark_entry_synced(db, entry_id)
                 except Exception:
                     pass  # stays unsynced, user can /retry later
@@ -220,6 +258,7 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
         day_data["confirmed"] = day_data.get("confirmed", 0) + 1
         await query.edit_message_text(f"\u2705 {', '.join(foods)} logged!")
+        await _send_macro_update(update, context, parsed_date)
 
         # Send next slot
         has_next = await _send_next_slot(update, context)
@@ -268,6 +307,7 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
         day_data["confirmed"] = day_data.get("confirmed", 0) + 1
         await query.edit_message_text(f"\u2705 {', '.join(picked['foods'])} logged!")
+        await _send_macro_update(update, context, parsed_date)
 
         has_next = await _send_next_slot(update, context)
         if not has_next:
@@ -343,6 +383,7 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
                 day_data["confirmed"] = day_data.get("confirmed", 0) + 1
                 await query.edit_message_text(f"\u2705 {details['name']} logged!")
+                await _send_macro_update(update, context, parsed_date)
 
                 has_next = await _send_next_slot(update, context)
                 if not has_next:
@@ -371,7 +412,7 @@ async def search_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     client = context.user_data.get("mfp_client")
     if not client:
-        await update.message.reply_text("Not connected to MFP. Please /login first.")
+        await update.message.reply_text("Not connected to MFP. Please /token first.")
         return
 
     query_text = update.message.text.strip()

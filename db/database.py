@@ -56,7 +56,8 @@ CREATE TABLE IF NOT EXISTS meal_patterns (
     mfp_food_ids TEXT NOT NULL DEFAULT '[]',
     weight REAL NOT NULL DEFAULT 1.0,
     last_confirmed TEXT NOT NULL DEFAULT '',
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    serving_info TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS week_progress (
@@ -172,10 +173,10 @@ async def get_meal_entries(
 async def save_meal_pattern(db: aiosqlite.Connection, pattern: MealPattern) -> int:
     cursor = await db.execute(
         """INSERT INTO meal_patterns
-           (telegram_user_id, slot, day_type, food_combo, mfp_food_ids, weight, last_confirmed, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+           (telegram_user_id, slot, day_type, food_combo, mfp_food_ids, weight, last_confirmed, updated_at, serving_info)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (pattern.telegram_user_id, pattern.slot, pattern.day_type, pattern.food_combo,
-         pattern.mfp_food_ids, pattern.weight, pattern.last_confirmed, pattern.updated_at),
+         pattern.mfp_food_ids, pattern.weight, pattern.last_confirmed, pattern.updated_at, pattern.serving_info),
     )
     await db.commit()
     return cursor.lastrowid
@@ -205,6 +206,7 @@ async def get_meal_patterns(
                 weight=row["weight"],
                 last_confirmed=row["last_confirmed"],
                 updated_at=row["updated_at"],
+                serving_info=row["serving_info"],
             ))
     return patterns
 
@@ -280,9 +282,9 @@ async def get_active_week_progress(db: aiosqlite.Connection, telegram_user_id: i
 
 
 async def update_week_progress(db: aiosqlite.Connection, wp_id: int, current_day: str, status: str) -> None:
-    from datetime import datetime
+    from datetime import UTC, datetime
     await db.execute(
         "UPDATE week_progress SET current_day = ?, status = ?, updated_at = ? WHERE id = ?",
-        (current_day, status, datetime.utcnow().isoformat(), wp_id),
+        (current_day, status, datetime.now(UTC).isoformat(), wp_id),
     )
     await db.commit()

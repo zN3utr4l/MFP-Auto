@@ -36,3 +36,20 @@ def test_format_slot_no_pattern():
     prediction = {"confidence": "none", "top": None, "alternatives": []}
     msg = format_slot_message("dinner", prediction)
     assert msg  # Should return something, not empty
+
+
+def test_format_history():
+    from bot.messages import format_history
+
+    days = [
+        {"date": "2026-04-07", "totals": {"calories": 2450, "protein": 175, "carbs": 290, "fat": 62}},
+        {"date": "2026-04-08", "totals": {"calories": 2680, "protein": 190, "carbs": 310, "fat": 70}},
+    ]
+    goals = {"calories": 2505, "protein": 180, "carbs": 300, "fat": 65}
+
+    result = format_history(days, goals)
+    assert "Tue 07" in result  # 2026-04-07 is a Tuesday
+    assert "Wed 08" in result
+    assert "Average" in result
+    assert "Target" in result
+    assert "over" in result  # Wed exceeds goals

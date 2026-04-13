@@ -54,3 +54,4 @@ DECAY_RATE: float = 0.95  # per-week decay factor
 MAX_ALTERNATIVES: int = 3
 SCRAPE_RATE_LIMIT: float = 1.0  # seconds between MFP requests
 WEEK_TIMEOUT_MINUTES: int = 30
+REMINDER_HOUR: int = 21  # 24h format, local time (Italy)

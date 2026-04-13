@@ -81,3 +81,23 @@ def import_range_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("All", callback_data="import:730"),
         ],
     ])
+
+
+def serving_size_keyboard(callback_prefix: str, serving_sizes: list[dict]) -> InlineKeyboardMarkup:
+    """Show serving_size options as buttons."""
+    rows = []
+    for ss in serving_sizes[:6]:
+        label = f"{ss.get('value', 1)} {ss['unit']}"
+        rows.append([InlineKeyboardButton(label, callback_data=f"{callback_prefix}:{ss['index']}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def servings_keyboard(callback_prefix: str, serving_size_index: int) -> InlineKeyboardMarkup:
+    """Show quick quantity buttons + custom option."""
+    amounts = [0.5, 1, 1.5, 2]
+    buttons = [
+        InlineKeyboardButton(str(a), callback_data=f"{callback_prefix}:{serving_size_index}:{a}")
+        for a in amounts
+    ]
+    buttons.append(InlineKeyboardButton("custom", callback_data=f"{callback_prefix}:{serving_size_index}:custom"))
+    return InlineKeyboardMarkup([buttons])

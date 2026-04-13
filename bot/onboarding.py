@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
-
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from bot.keyboards import import_range_keyboard
 from db.database import encrypt_password, get_user, save_user
 from db.models import User
-from engine.pattern_analyzer import analyze_history
 from mfp.client import MfpClient
-from mfp.scraper import scrape_history
 
 TOKEN_URL = "https://www.myfitnesspal.com/user/auth_token?refresh=true"
 
@@ -21,18 +16,32 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     if user and user.onboarding_done:
         await update.message.reply_text(
-            "Welcome back! Use /today, /week, or /status."
+            "Welcome back!\n\n"
+            "/today — log today's meals\n"
+            "/tomorrow — plan tomorrow\n"
+            "/week — plan the whole week\n"
+            "/macros — check remaining macros\n"
+            "/suggest — what to eat next\n"
+            "/copy yesterday — repeat a day\n"
+            "/history — 7-day overview\n"
+            "/setup — reconfigure your foods\n"
+            "/status — slots overview",
         )
         return
 
     await update.message.reply_text(
-        "Hi! To connect your MyFitnessPal account:\n\n"
-        "1. Login to myfitnesspal.com in your browser\n"
-        f"2. Visit this URL:\n`{TOKEN_URL}`\n"
-        "3. Copy ALL the text on the page\n"
-        "4. Send it to me with:\n"
-        "`/token paste_here`\n\n"
-        "The message will be deleted immediately for security.",
+        "Welcome to MFP Auto Bot!\n"
+        "I'll help you log meals on MyFitnessPal faster.\n\n"
+        "Let's connect your account. Here's how:\n\n"
+        "*Step 1:* Open your browser and log into myfitnesspal.com\n\n"
+        "*Step 2:* Once logged in, open this link:\n"
+        f"`{TOKEN_URL}`\n\n"
+        "*Step 3:* You'll see a page with JSON text "
+        "(starts with `{\"access_token\":...}`). "
+        "Select ALL the text and copy it.\n\n"
+        "*Step 4:* Come back here and send:\n"
+        "`/token <paste the text here>`\n\n"
+        "Your token will be deleted from chat immediately for security.",
         parse_mode="Markdown",
     )
 
@@ -73,71 +82,28 @@ async def token_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     # Save user — store the token JSON encrypted
     encrypted_token = encrypt_password(token_json)
+    existing = await get_user(db, update.effective_user.id)
     user = User(
         telegram_user_id=update.effective_user.id,
         mfp_username=username,
         mfp_password_encrypted=encrypted_token,
+        onboarding_done=True,
     )
+    if existing:
+        user.is_premium = existing.is_premium
     await save_user(db, user)
 
     context.user_data["mfp_client"] = client
 
     await status_msg.edit_text(
-        f"Connected as {username} on MFP!\n\n"
-        "How much history should I import?",
-        reply_markup=import_range_keyboard(),
-    )
-
-
-async def import_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-
-    db = context.bot_data["db"]
-    telegram_user_id = update.effective_user.id
-
-    days = int(query.data.split(":")[1])
-    end_date = date.today()
-    start_date = end_date - timedelta(days=days)
-
-    client = context.user_data.get("mfp_client")
-    if not client:
-        user = await get_user(db, telegram_user_id)
-        if not user:
-            await query.edit_message_text("Please /start first.")
-            return
-        from db.database import decrypt_password
-        token_json = decrypt_password(user.mfp_password_encrypted)
-        client = MfpClient.from_auth_json(token_json)
-        context.user_data["mfp_client"] = client
-
-    await query.edit_message_text(
-        f"Importing {days} days of history... This may take a while.\n"
-        f"(~{days} seconds at 1 request/second)"
-    )
-
-    async def on_progress(current_date: date, total: int) -> None:
-        if (end_date - current_date).days % 10 == 0:
-            try:
-                await query.edit_message_text(
-                    f"Importing... {current_date.isoformat()} ({total} entries so far)"
-                )
-            except Exception:
-                pass
-
-    total = await scrape_history(
-        db, client, telegram_user_id, start_date, end_date, on_progress=on_progress
-    )
-
-    pattern_count = await analyze_history(db, telegram_user_id)
-
-    user = await get_user(db, telegram_user_id)
-    user.onboarding_done = True
-    await save_user(db, user)
-
-    await query.edit_message_text(
-        f"Bootstrap complete!\n"
-        f"Imported: {total} entries\n"
-        f"Patterns found: {pattern_count}\n\n"
-        f"Try /today to see today's meals!"
+        f"Connected as *{username}* on MFP!\n\n"
+        "*What's next?*\n\n"
+        "*Option A — Quick setup (recommended):*\n"
+        "Send /setup and I'll ask you to search for the foods you "
+        "eat regularly (the exact ones you use on MFP, barcodes included). "
+        "Takes 5 min, predictions work from day 1.\n\n"
+        "*Option B — Jump right in:*\n"
+        "Send /today and start logging. I'll learn your preferences "
+        "as you go. Predictions improve after 2-3 days.",
+        parse_mode="Markdown",
     )
