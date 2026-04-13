@@ -129,9 +129,13 @@ async def _send_next_slot(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     current_idx = day_data.get("current_slot_idx", -1) + 1
 
-    # Find next slot that hasn't been filled
+    # Find next slot that hasn't been filled (check local DB + MFP diary)
+    mfp_filled = day_data.get("mfp_filled", set())
     while current_idx < len(MEAL_SLOTS):
         slot = MEAL_SLOTS[current_idx]
+        if slot in mfp_filled:
+            current_idx += 1
+            continue
         existing = await get_meal_entries(db, user_id, target_date.isoformat(), slot)
         if not existing:
             context.user_data["current_day"]["current_slot_idx"] = current_idx
@@ -140,6 +144,23 @@ async def _send_next_slot(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         current_idx += 1
 
     return False
+
+
+async def _fetch_mfp_filled_slots(client, target_date: date) -> set[str]:
+    """Check which slots already have food logged on MFP (via API diary)."""
+    from config import MFP_DEFAULT_MEALS
+    filled = set()
+    try:
+        meals = await client.get_day(target_date)
+        for m in meals:
+            if m.get("entries"):
+                meal_name = m["meal_name"]
+                slot = MFP_DEFAULT_MEALS.get(meal_name)
+                if slot:
+                    filled.add(slot)
+    except Exception:
+        logger.debug("Could not check MFP diary for %s", target_date, exc_info=True)
+    return filled
 
 
 async def start_day_flow(
@@ -153,6 +174,12 @@ async def start_day_flow(
     db = context.bot_data["db"]
     user_id = update.effective_user.id
 
+    # Check MFP diary for already-filled slots
+    client = context.user_data.get("mfp_client")
+    mfp_filled = set()
+    if client:
+        mfp_filled = await _fetch_mfp_filled_slots(client, target_date)
+
     predictions = await predict_day(db, user_id, target_date)
 
     # Store all predictions for this day
@@ -165,9 +192,14 @@ async def start_day_flow(
         "skipped": 0,
         "day_index": day_index,
         "total_days": total_days,
+        "mfp_filled": mfp_filled,
     }
 
     header = format_day_header(target_date.isoformat(), day_index, total_days)
+    if mfp_filled:
+        from config import MEAL_SLOT_LABELS
+        filled_names = [MEAL_SLOT_LABELS.get(s, s) for s in MEAL_SLOTS if s in mfp_filled]
+        header += f"\nAlready on MFP: {', '.join(filled_names)}"
     await update.effective_chat.send_message(header, parse_mode="Markdown")
 
     has_slot = await _send_next_slot(update, context)
