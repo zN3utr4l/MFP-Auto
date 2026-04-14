@@ -19,7 +19,7 @@ def format_slot_message(slot: str, prediction: dict) -> str:
     confidence = prediction["confidence"]
 
     if confidence == "none":
-        return f"{emoji} *{label}*\n\U0001F50D No pattern yet — search or skip"
+        return f"{emoji} *{label}*\nNo pattern yet — search or skip"
 
     if confidence == "high":
         foods = ", ".join(prediction["top"]["foods"])
@@ -32,7 +32,7 @@ def format_slot_message(slot: str, prediction: dict) -> str:
             qty = ""
         return f"{emoji} *{label}*\n{foods}{qty}"
 
-    # Low confidence — show numbered alternatives
+    # Low confidence
     lines = [f"{emoji} *{label}*\nPick one:"]
     for i, alt in enumerate(prediction["alternatives"], 1):
         foods = ", ".join(alt["foods"])
@@ -73,20 +73,23 @@ def format_macro_summary(totals: dict, goals: dict) -> str:
 
         if current > goal:
             over_any = True
-            lines.append(f"{emoji} {label}: {current:.0f}/{goal:.0f}{unit} {bar} *+{-remaining:.0f} over*")
-        elif remaining <= goal * 0.1:
-            lines.append(f"{emoji} {label}: {current:.0f}/{goal:.0f}{unit} {bar} _{remaining:.0f} left_")
+            lines.append(f"{emoji} {label}  {bar}  {current:.0f}/{goal:.0f}{unit} (*+{-remaining:.0f}*)")
+        elif remaining <= goal * 0.15:
+            lines.append(f"{emoji} {label}  {bar}  {current:.0f}/{goal:.0f}{unit} (_{remaining:.0f} left_)")
         else:
-            lines.append(f"{emoji} {label}: {current:.0f}/{goal:.0f}{unit} {bar}")
+            lines.append(f"{emoji} {label}  {bar}  {current:.0f}/{goal:.0f}{unit}")
 
     if not lines:
         return ""
 
-    header = "\U0001F4CA *Daily macros:*" if not over_any else "\u26A0 *Macros — adjust next meals:*"
-    return header + "\n" + "\n".join(lines)
+    if over_any:
+        header = "\u26A0\uFE0F *Over budget — adjust next meals*"
+    else:
+        header = "\U0001F4CA *Today's macros*"
+    return header + "\n\n" + "\n".join(lines)
 
 
-def _progress_bar(current: float, goal: float, length: int = 8) -> str:
+def _progress_bar(current: float, goal: float, length: int = 10) -> str:
     if goal <= 0:
         return ""
     ratio = min(current / goal, 1.0)
@@ -98,7 +101,7 @@ def format_history(days: list[dict], goals: dict) -> str:
     if not days:
         return "No data available."
 
-    lines = ["\U0001F4C8 *Weekly history:*\n"]
+    lines = ["\U0001F4C8 *Last 7 days*\n"]
     sum_cal, sum_p, sum_c, sum_f = 0.0, 0.0, 0.0, 0.0
 
     for day in days:
@@ -112,20 +115,29 @@ def format_history(days: list[dict], goals: dict) -> str:
 
         marker = ""
         if goals and goals.get("calories"):
-            over = (cal > goals["calories"] * 1.05 or p > goals["protein"] * 1.05
-                    or c > goals["carbs"] * 1.05 or f > goals["fat"] * 1.05)
-            on_target = (not over and cal >= goals["calories"] * 0.95
-                         and p >= goals["protein"] * 0.95)
-            marker = " \u274C" if over else (" \u2705" if on_target else "")
+            over = (cal > goals["calories"] * 1.05 or f > goals["fat"] * 1.05)
+            on_target = (not over and cal >= goals["calories"] * 0.90
+                         and p >= goals["protein"] * 0.90)
+            if over:
+                marker = " \u274C"
+            elif on_target:
+                marker = " \u2705"
 
-        lines.append(f"`{d.strftime('%a %d')}` {cal:.0f} cal | P:{p:.0f} C:{c:.0f} F:{f:.0f}{marker}")
+        lines.append(
+            f"`{d.strftime('%a %d')}` {cal:.0f} cal  "
+            f"P:{p:.0f}  C:{c:.0f}  F:{f:.0f}{marker}"
+        )
 
     n = len(days)
-    lines.append(f"\n*Avg:* {sum_cal/n:.0f} cal | P:{sum_p/n:.0f} C:{sum_c/n:.0f} F:{sum_f/n:.0f}")
+    lines.append("")
+    lines.append(
+        f"\U0001F4CA *Avg:* {sum_cal/n:.0f} cal  "
+        f"P:{sum_p/n:.0f}  C:{sum_c/n:.0f}  F:{sum_f/n:.0f}"
+    )
     if goals and goals.get("calories"):
         lines.append(
-            f"*Goal:* {goals['calories']:.0f} cal | P:{goals['protein']:.0f} "
-            f"C:{goals['carbs']:.0f} F:{goals['fat']:.0f}"
+            f"\U0001F3AF *Goal:* {goals['calories']:.0f} cal  "
+            f"P:{goals['protein']:.0f}  C:{goals['carbs']:.0f}  F:{goals['fat']:.0f}"
         )
 
     return "\n".join(lines)
@@ -135,5 +147,27 @@ def format_status_line(date_str: str, logged: int, pending: int) -> str:
     d = date.fromisoformat(date_str)
     day_name = d.strftime("%a")
     if pending == 0:
-        return f"\u2705 `{day_name} {date_str}` {logged} logged"
-    return f"\u23F3 `{day_name} {date_str}` {logged}/{logged + pending} slots"
+        return f"\u2705 `{day_name} {date_str}`  {logged} logged"
+    return f"\u23F3 `{day_name} {date_str}`  {logged}/{logged + pending} slots"
+
+
+def format_filled_slot(slot: str, foods: list[str], macros: dict) -> str:
+    """Format a single already-filled slot for the /today header."""
+    from bot.daily import _clean_food_name
+
+    emoji = MEAL_SLOT_EMOJIS.get(slot, "")
+    label = MEAL_SLOT_LABELS.get(slot, slot)
+    cal = macros.get("calories", 0)
+    p = macros.get("protein", 0)
+    c = macros.get("carbs", 0)
+    f = macros.get("fat", 0)
+
+    lines = [f"{emoji} *{label}*  _{cal:.0f}cal  P:{p:.0f}  C:{c:.0f}  F:{f:.0f}_"]
+
+    if foods and not (len(foods) == 1 and "cal)" in foods[0]):
+        for food in foods[:4]:
+            lines.append(f"  \u2022 {_clean_food_name(food)}")
+        if len(foods) > 4:
+            lines.append(f"  _...+{len(foods) - 4} more_")
+
+    return "\n".join(lines)

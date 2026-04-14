@@ -50,11 +50,29 @@ def _start_health_server() -> None:
 
 
 async def post_init(application: Application) -> None:
-    """Called after Application.initialize(). Set up DB connection."""
+    """Called after Application.initialize(). Set up DB, commands, reminders."""
     os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
     application.bot_data["db"] = await get_db(DB_PATH)
     from bot.reminder import schedule_reminders
     schedule_reminders(application)
+
+    from telegram import BotCommand
+    await application.bot.set_my_commands([
+        BotCommand("today", "Log today's meals"),
+        BotCommand("tomorrow", "Plan tomorrow"),
+        BotCommand("week", "Plan the whole week"),
+        BotCommand("macros", "Check remaining macros"),
+        BotCommand("suggest", "What to eat next"),
+        BotCommand("history", "7-day macro overview"),
+        BotCommand("copy", "Copy meals from another day"),
+        BotCommand("setup", "Configure your typical foods"),
+        BotCommand("import", "Import MFP diary history"),
+        BotCommand("status", "Slots filled/pending"),
+        BotCommand("undo", "Remove last entry"),
+        BotCommand("retry", "Retry failed MFP syncs"),
+        BotCommand("token", "Refresh MFP auth token"),
+        BotCommand("start", "Help & command list"),
+    ])
 
 
 async def post_shutdown(application: Application) -> None:

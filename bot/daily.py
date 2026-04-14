@@ -15,7 +15,7 @@ from bot.keyboards import (
     slot_keyboard_low,
     slot_keyboard_none,
 )
-from bot.messages import format_day_header, format_day_summary, format_macro_summary, format_slot_message
+from bot.messages import format_day_header, format_day_summary, format_filled_slot, format_macro_summary, format_slot_message
 from config import MEAL_SLOTS
 from db.database import (
     decrypt_password,
@@ -270,21 +270,15 @@ async def start_day_flow(
 
     header = format_day_header(target_date.isoformat(), day_index, total_days)
     if mfp_filled:
-        from config import MEAL_SLOT_EMOJIS, MEAL_SLOT_LABELS
         header += "\n"
         for slot in MEAL_SLOTS:
             if slot in mfp_filled:
                 m = mfp_filled[slot]
-                emoji = MEAL_SLOT_EMOJIS.get(slot, "")
-                label = MEAL_SLOT_LABELS.get(slot, slot)
-                macros = f"{m['calories']:.0f}cal P:{m['protein']:.0f} C:{m['carbs']:.0f} F:{m['fat']:.0f}"
-                header += f"\n{emoji} *{label}* _{macros}_"
-                foods = m.get("foods", [])
-                if foods and not (len(foods) == 1 and "cal)" in foods[0]):
-                    for food in foods[:5]:
-                        header += f"\n  \u2022 {_clean_food_name(food)}"
-                    if len(foods) > 5:
-                        header += f"\n  _+{len(foods) - 5} more_"
+                header += "\n" + format_filled_slot(
+                    slot, m.get("foods", []),
+                    {"calories": m["calories"], "protein": m["protein"],
+                     "carbs": m["carbs"], "fat": m["fat"]},
+                )
     await update.effective_chat.send_message(header, parse_mode="Markdown")
 
     has_slot = await _send_next_slot(update, context)
