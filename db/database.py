@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS meals_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    telegram_user_id INTEGER NOT NULL REFERENCES users(telegram_user_id),
+    telegram_user_id INTEGER NOT NULL,
     date TEXT NOT NULL,
     day_of_week INTEGER NOT NULL,
     slot TEXT NOT NULL,
@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS meals_history (
 
 CREATE TABLE IF NOT EXISTS meal_patterns (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    telegram_user_id INTEGER NOT NULL REFERENCES users(telegram_user_id),
+    telegram_user_id INTEGER NOT NULL,
     slot TEXT NOT NULL,
     day_type TEXT NOT NULL,
     food_combo TEXT NOT NULL,
@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS meal_patterns (
 
 CREATE TABLE IF NOT EXISTS week_progress (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    telegram_user_id INTEGER NOT NULL REFERENCES users(telegram_user_id),
+    telegram_user_id INTEGER NOT NULL,
     week_start TEXT NOT NULL,
     current_day TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'in_progress',
