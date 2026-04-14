@@ -15,40 +15,31 @@ TURSO_AUTH_TOKEN: str = os.environ.get("TURSO_AUTH_TOKEN", "")
 
 MEAL_SLOTS: list[str] = [
     "breakfast",
-    "morning_snack",
     "lunch",
-    "afternoon_snack",
-    "pre_workout",
-    "post_workout",
     "dinner",
+    "snacks",
 ]
 
 MEAL_SLOT_LABELS: dict[str, str] = {
     "breakfast": "Breakfast",
-    "morning_snack": "Morning Snack",
     "lunch": "Lunch",
-    "afternoon_snack": "Afternoon Snack",
-    "pre_workout": "Pre-Workout",
-    "post_workout": "Post-Workout",
     "dinner": "Dinner",
+    "snacks": "Snacks",
 }
 
 MEAL_SLOT_EMOJIS: dict[str, str] = {
     "breakfast": "\u2615",
-    "morning_snack": "\U0001F95C",
     "lunch": "\U0001F35D",
-    "afternoon_snack": "\U0001F34E",
-    "pre_workout": "\U0001F4AA",
-    "post_workout": "\U0001F3CB\uFE0F",
     "dinner": "\U0001F37D",
+    "snacks": "\U0001F95C",
 }
 
-# MFP default meal names -> our slot mapping (for 4-slot accounts)
+# MFP meal names -> our slot mapping (1:1 now)
 MFP_DEFAULT_MEALS: dict[str, str] = {
     "Breakfast": "breakfast",
     "Lunch": "lunch",
     "Dinner": "dinner",
-    "Snacks": "morning_snack",  # default fallback; refined during onboarding
+    "Snacks": "snacks",
 }
 
 HIGH_CONFIDENCE_THRESHOLD: float = 0.70

@@ -14,12 +14,9 @@ logger = logging.getLogger(__name__)
 # Bot slot name → MFP meal_position integer
 _SLOT_TO_MEAL_POSITION: dict[str, int] = {
     "breakfast": 0,
-    "morning_snack": 3,
     "lunch": 1,
-    "afternoon_snack": 3,
-    "pre_workout": 3,
-    "post_workout": 3,
     "dinner": 2,
+    "snacks": 3,
 }
 
 

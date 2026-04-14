@@ -24,7 +24,7 @@ async def test_count_empty_slots_all_empty(db):
     await save_user(db, user)
 
     count = await _count_empty_slots(db, 12345, date.today())
-    assert count == 7
+    assert count == 4  # breakfast, lunch, dinner, snacks
 
 
 @pytest.mark.asyncio
@@ -38,7 +38,7 @@ async def test_count_empty_slots_partial(db):
                       slot="breakfast", food_name="Oats", quantity="80g")
     await save_meal_entry(db, entry)
     count = await _count_empty_slots(db, 12345, date.today())
-    assert count == 6
+    assert count == 3  # lunch, dinner, snacks still empty
 
 
 def test_schedule_reminders_uses_rome_timezone():

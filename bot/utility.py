@@ -18,19 +18,38 @@ from mfp.sync import retry_unsynced
 
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from bot.daily import _ensure_client
+
     db = context.bot_data["db"]
     user_id = update.effective_user.id
     today = date.today()
+    client = await _ensure_client(update, context)
 
     lines = ["\U0001F4CB *Weekly Status*\n"]
 
     for i in range(7):
         d = today + timedelta(days=i)
         logged = 0
-        for slot in MEAL_SLOTS:
-            entries = await get_meal_entries(db, user_id, d.isoformat(), slot)
-            if entries:
-                logged += 1
+
+        # Check MFP diary for this day
+        if client:
+            try:
+                totals = await client.get_day_totals(d)
+                if totals.get("calories", 0) > 0:
+                    # Count filled slots from MFP diary
+                    from bot.daily import _fetch_mfp_filled_slots
+                    filled = await _fetch_mfp_filled_slots(client, d)
+                    logged = len(filled)
+            except Exception:
+                pass
+
+        # Also count local DB entries
+        if logged == 0:
+            for slot in MEAL_SLOTS:
+                entries = await get_meal_entries(db, user_id, d.isoformat(), slot)
+                if entries:
+                    logged += 1
+
         pending = len(MEAL_SLOTS) - logged
         lines.append(format_status_line(d.isoformat(), logged, pending))
 
