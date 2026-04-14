@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import date, timedelta
 
 from telegram import Update
@@ -146,18 +147,35 @@ async def _send_next_slot(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     return False
 
 
-async def _fetch_mfp_filled_slots(client, target_date: date) -> set[str]:
-    """Check which slots already have food logged on MFP (via API diary)."""
+async def _fetch_mfp_filled_slots(client, target_date: date) -> dict[str, dict]:
+    """Check which slots already have food logged on MFP.
+
+    Returns {slot: {calories, protein, carbs, fat}} for non-empty slots.
+    """
     from config import MFP_DEFAULT_MEALS
-    filled = set()
+    filled: dict[str, dict] = {}
     try:
-        meals = await client.get_day(target_date)
-        for m in meals:
-            if m.get("entries"):
-                meal_name = m["meal_name"]
+        date_str = target_date.strftime("%Y-%m-%d")
+        data = await asyncio.to_thread(
+            client._api_get, "v2/diary",
+            [("entry_date", date_str), ("fields[]", "nutritional_contents")],
+        )
+        for item in data.get("items", []):
+            if item.get("type") != "diary_meal":
+                continue
+            nc = item.get("nutritional_contents", {})
+            energy = nc.get("energy", {})
+            cal = energy.get("value", 0) if isinstance(energy, dict) else 0
+            if cal > 0:
+                meal_name = item.get("diary_meal", "")
                 slot = MFP_DEFAULT_MEALS.get(meal_name)
                 if slot:
-                    filled.add(slot)
+                    filled[slot] = {
+                        "calories": cal,
+                        "protein": nc.get("protein", 0),
+                        "carbs": nc.get("carbohydrates", 0),
+                        "fat": nc.get("fat", 0),
+                    }
     except Exception:
         logger.debug("Could not check MFP diary for %s", target_date, exc_info=True)
     return filled
@@ -197,10 +215,18 @@ async def start_day_flow(
 
     header = format_day_header(target_date.isoformat(), day_index, total_days)
     if mfp_filled:
-        from config import MEAL_SLOT_LABELS
-        filled_names = [MEAL_SLOT_LABELS.get(s, s) for s in MEAL_SLOTS if s in mfp_filled]
-        header += f"\nAlready on MFP: {', '.join(filled_names)}"
-    await update.effective_chat.send_message(header, parse_mode="Markdown")
+        from config import MEAL_SLOT_EMOJIS, MEAL_SLOT_LABELS
+        header += "\n\nAlready on MFP:"
+        for slot in MEAL_SLOTS:
+            if slot in mfp_filled:
+                m = mfp_filled[slot]
+                emoji = MEAL_SLOT_EMOJIS.get(slot, "")
+                label = MEAL_SLOT_LABELS.get(slot, slot)
+                header += (
+                    f"\n  {emoji} {label}: {m['calories']:.0f} cal"
+                    f" | P:{m['protein']:.0f} C:{m['carbs']:.0f} F:{m['fat']:.0f}"
+                )
+    await update.effective_chat.send_message(header)
 
     has_slot = await _send_next_slot(update, context)
     if not has_slot:
