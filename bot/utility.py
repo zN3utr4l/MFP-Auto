@@ -340,3 +340,19 @@ async def patterns_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if len(text) > 4000:
         text = text[:3950] + "\n\n_...truncated_"
     await update.message.reply_text(text, parse_mode="Markdown")
+
+
+async def analyze_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from engine.pattern_analyzer import analyze_history
+
+    db = context.bot_data["db"]
+    user_id = update.effective_user.id
+
+    msg = await update.message.reply_text("\U0001F50D Analyzing your meal history...")
+    pattern_count = await analyze_history(db, user_id)
+    await msg.edit_text(
+        f"\u2705 Analysis complete!\n"
+        f"*{pattern_count}* patterns found.\n\n"
+        "Use /patterns to see them, or /today to get predictions.",
+        parse_mode="Markdown",
+    )

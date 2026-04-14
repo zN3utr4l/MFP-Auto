@@ -68,6 +68,7 @@ async def post_init(application: Application) -> None:
         BotCommand("setup", "Configure your typical foods"),
         BotCommand("import", "Import MFP diary history"),
         BotCommand("patterns", "View learned food patterns"),
+        BotCommand("analyze", "Rebuild patterns from history"),
         BotCommand("status", "Slots filled/pending"),
         BotCommand("undo", "Remove last entry"),
         BotCommand("retry", "Retry failed MFP syncs"),
@@ -88,7 +89,7 @@ def main() -> None:
     from bot.onboarding import import_callback, import_command, token_command, start_command
     from bot.setup import setup_callback, setup_command, setup_search_handler
     from bot.suggest import suggest_command
-    from bot.utility import copy_command, history_command, macros_command, patterns_command, retry_command, status_command, undo_command
+    from bot.utility import analyze_command, copy_command, history_command, macros_command, patterns_command, retry_command, status_command, undo_command
     from bot.week import week_command, week_stop_callback
 
     application = (
@@ -116,6 +117,7 @@ def main() -> None:
     application.add_handler(CommandHandler("copy", copy_command))
     application.add_handler(CommandHandler("history", history_command))
     application.add_handler(CommandHandler("patterns", patterns_command))
+    application.add_handler(CommandHandler("analyze", analyze_command))
 
     # Callback handlers — order matters (more specific patterns first)
     application.add_handler(CallbackQueryHandler(import_callback, pattern=r"^import:"))
