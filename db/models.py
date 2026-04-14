@@ -10,7 +10,6 @@ class User:
     telegram_user_id: int
     mfp_username: str
     mfp_password_encrypted: str
-    is_premium: bool = False
     onboarding_done: bool = False
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 

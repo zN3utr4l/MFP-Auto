@@ -28,7 +28,6 @@ CREATE TABLE IF NOT EXISTS users (
     telegram_user_id INTEGER PRIMARY KEY,
     mfp_username TEXT NOT NULL,
     mfp_password_encrypted TEXT NOT NULL,
-    is_premium INTEGER NOT NULL DEFAULT 0,
     onboarding_done INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
@@ -105,10 +104,10 @@ async def get_db(path: str):
 async def save_user(db: aiosqlite.Connection, user: User) -> None:
     await db.execute(
         """INSERT OR REPLACE INTO users
-           (telegram_user_id, mfp_username, mfp_password_encrypted, is_premium, onboarding_done, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)""",
+           (telegram_user_id, mfp_username, mfp_password_encrypted, onboarding_done, created_at)
+           VALUES (?, ?, ?, ?, ?)""",
         (user.telegram_user_id, user.mfp_username, user.mfp_password_encrypted,
-         int(user.is_premium), int(user.onboarding_done), user.created_at),
+         int(user.onboarding_done), user.created_at),
     )
     await db.commit()
 
@@ -124,7 +123,6 @@ async def get_user(db: aiosqlite.Connection, telegram_user_id: int) -> User | No
         telegram_user_id=row["telegram_user_id"],
         mfp_username=row["mfp_username"],
         mfp_password_encrypted=row["mfp_password_encrypted"],
-        is_premium=bool(row["is_premium"]),
         onboarding_done=bool(row["onboarding_done"]),
         created_at=row["created_at"],
     )

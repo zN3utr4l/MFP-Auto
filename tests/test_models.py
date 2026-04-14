@@ -6,7 +6,6 @@ def test_user_creation():
         telegram_user_id=12345,
         mfp_username="testuser",
         mfp_password_encrypted="encrypted_password",
-        is_premium=True,
         onboarding_done=False,
     )
     assert user.telegram_user_id == 12345

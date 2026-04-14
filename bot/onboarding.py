@@ -85,15 +85,12 @@ async def token_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     encrypted_token = encrypt_password(token_json)
-    existing = await get_user(db, update.effective_user.id)
     user = User(
         telegram_user_id=update.effective_user.id,
         mfp_username=username,
         mfp_password_encrypted=encrypted_token,
         onboarding_done=True,
     )
-    if existing:
-        user.is_premium = existing.is_premium
     await save_user(db, user)
 
     context.user_data["mfp_client"] = client
