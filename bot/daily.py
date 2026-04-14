@@ -32,8 +32,29 @@ from mfp.client import MfpClient
 DAY_NAMES = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 
 import logging
+import re
 
 logger = logging.getLogger(__name__)
+
+
+def _clean_food_name(name: str) -> str:
+    """Clean MFP food names: 'Brand - Food (details)' → shorter readable form."""
+    # Remove "Brand - " prefix if the food name after dash is meaningful
+    if " - " in name:
+        parts = name.split(" - ", 1)
+        brand, food = parts[0].strip(), parts[1].strip()
+        # If brand and food are the same (e.g., "Petto di pollo - Petto di pollo (160g)")
+        if food.lower().startswith(brand.lower()):
+            name = food
+        else:
+            # Keep just the food part if it's descriptive enough
+            name = food
+    # Trim overly long parenthetical details
+    name = re.sub(r'\s*\([^)]{30,}\)', '', name)
+    # Cap length
+    if len(name) > 40:
+        name = name[:37] + "..."
+    return name
 
 
 def _extract_serving_infos(raw_serving_info: object, food_count: int) -> list[dict]:
@@ -250,26 +271,21 @@ async def start_day_flow(
     header = format_day_header(target_date.isoformat(), day_index, total_days)
     if mfp_filled:
         from config import MEAL_SLOT_EMOJIS, MEAL_SLOT_LABELS
-        header += "\n\nAlready on MFP:"
+        header += "\n"
         for slot in MEAL_SLOTS:
             if slot in mfp_filled:
                 m = mfp_filled[slot]
                 emoji = MEAL_SLOT_EMOJIS.get(slot, "")
                 label = MEAL_SLOT_LABELS.get(slot, slot)
+                macros = f"{m['calories']:.0f}cal P:{m['protein']:.0f} C:{m['carbs']:.0f} F:{m['fat']:.0f}"
+                header += f"\n{emoji} *{label}* _{macros}_"
                 foods = m.get("foods", [])
                 if foods and not (len(foods) == 1 and "cal)" in foods[0]):
-                    # Show individual food names
-                    food_list = ", ".join(foods[:4])
-                    if len(foods) > 4:
-                        food_list += f" +{len(foods) - 4}"
-                    header += f"\n  {emoji} {label}: {food_list}"
-                    header += f"\n      {m['calories']:.0f} cal | P:{m['protein']:.0f} C:{m['carbs']:.0f} F:{m['fat']:.0f}"
-                else:
-                    header += (
-                        f"\n  {emoji} {label}: {m['calories']:.0f} cal"
-                        f" | P:{m['protein']:.0f} C:{m['carbs']:.0f} F:{m['fat']:.0f}"
-                    )
-    await update.effective_chat.send_message(header)
+                    for food in foods[:5]:
+                        header += f"\n  \u2022 {_clean_food_name(food)}"
+                    if len(foods) > 5:
+                        header += f"\n  _+{len(foods) - 5} more_"
+    await update.effective_chat.send_message(header, parse_mode="Markdown")
 
     has_slot = await _send_next_slot(update, context)
     if not has_slot:
