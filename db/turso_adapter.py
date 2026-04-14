@@ -100,6 +100,10 @@ async def connect_turso(url: str, auth_token: str) -> TursoDb:
     """Create a TursoDb connection."""
     import libsql_client
 
+    # libsql-client needs https:// URL for HTTP transport (not libsql:// which uses WebSocket)
+    if url.startswith("libsql://"):
+        url = url.replace("libsql://", "https://", 1)
+
     client = libsql_client.create_client(url=url, auth_token=auth_token)
     logger.info("Connected to Turso: %s", url.split("//")[1] if "//" in url else url)
     return TursoDb(client)
