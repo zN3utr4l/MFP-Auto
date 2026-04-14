@@ -136,9 +136,11 @@ class MfpClient:
 
         # Try the undocumented read_diary endpoint for individual food entries
         try:
-            return self._get_day_via_read_diary(date_str)
-        except Exception:
-            logger.debug("read_diary failed for %s, falling back to v2/diary", date_str, exc_info=True)
+            result = self._get_day_via_read_diary(date_str)
+            logger.info("read_diary OK for %s: %d meals", date_str,  len(result))
+            return result
+        except Exception as e:
+            logger.warning("read_diary failed for %s: %s — falling back to v2/diary", date_str, e)
 
         # Fallback: v2/diary (meal-level summaries only)
         return self._get_day_via_diary_summary(date_str)
