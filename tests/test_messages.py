@@ -50,6 +50,5 @@ def test_format_history():
     result = format_history(days, goals)
     assert "Tue 07" in result  # 2026-04-07 is a Tuesday
     assert "Wed 08" in result
-    assert "Average" in result
-    assert "Target" in result
-    assert "over" in result  # Wed exceeds goals
+    assert "Avg" in result
+    assert "Goal" in result

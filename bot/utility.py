@@ -6,7 +6,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from bot.messages import format_status_line
-from config import MEAL_SLOTS
+from config import MEAL_SLOT_EMOJIS, MEAL_SLOTS
 from db.database import (
     decrypt_password,
     get_meal_entries,
@@ -22,25 +22,23 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user_id = update.effective_user.id
     today = date.today()
 
-    lines = ["\U0001F4CA Weekly Status\n"]
+    lines = ["\U0001F4CB *Weekly Status*\n"]
 
     for i in range(7):
         d = today + timedelta(days=i)
         logged = 0
-        skipped = 0  # we can't know skipped from DB, just show logged vs pending
         for slot in MEAL_SLOTS:
             entries = await get_meal_entries(db, user_id, d.isoformat(), slot)
             if entries:
                 logged += 1
         pending = len(MEAL_SLOTS) - logged
-        lines.append(format_status_line(d.isoformat(), logged, pending, skipped))
+        lines.append(format_status_line(d.isoformat(), logged, pending))
 
-    # Unsynced count
     unsynced = await get_unsynced_entries(db, user_id)
     if unsynced:
-        lines.append(f"\n\u26A0 {len(unsynced)} entries not synced to MFP. Use /retry")
+        lines.append(f"\n\u26A0 _{len(unsynced)} entries not synced._ Use /retry")
 
-    await update.message.reply_text("\n".join(lines))
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
 async def undo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -55,20 +53,23 @@ async def undo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         row = await cursor.fetchone()
 
     if not row:
-        await update.message.reply_text("Nothing to undo.")
+        await update.message.reply_text("\u2049 Nothing to undo.")
         return
 
     food_name = row["food_name"]
     entry_date = row["date"]
     slot = row["slot"]
     entry_id = row["id"]
+    emoji = MEAL_SLOT_EMOJIS.get(slot, "")
 
     await db.execute("DELETE FROM meals_history WHERE id = ?", (entry_id,))
     await db.commit()
 
     await update.message.reply_text(
-        f"\u21A9 Removed: {food_name} from {slot} on {entry_date}\n"
-        "Note: if it was already synced to MFP, you'll need to remove it manually in the app."
+        f"\u21A9 *Removed:* {food_name}\n"
+        f"{emoji} {slot} on {entry_date}\n\n"
+        "_If already synced to MFP, remove it manually in the app._",
+        parse_mode="Markdown",
     )
 
 
@@ -86,10 +87,15 @@ async def retry_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         client = MfpClient.from_auth_json(token_json)
         context.user_data["mfp_client"] = client
 
-    msg = await update.message.reply_text("Retrying unsynced entries...")
+    msg = await update.message.reply_text("\U0001F504 Retrying unsynced entries...")
     synced, failed = await retry_unsynced(db, client, user_id)
 
-    await msg.edit_text(f"Retry complete: {synced} synced, {failed} failed.")
+    if failed:
+        await msg.edit_text(f"\u26A0 Retry: *{synced}* synced, *{failed}* failed.", parse_mode="Markdown")
+    elif synced:
+        await msg.edit_text(f"\u2705 All *{synced}* entries synced!", parse_mode="Markdown")
+    else:
+        await msg.edit_text("\u2705 Nothing to retry — all synced.")
 
 
 async def macros_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -112,7 +118,7 @@ async def macros_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     totals = await client.get_day_totals(date.today())
     summary = format_macro_summary(totals, goals)
-    await update.message.reply_text(summary or "No data for today yet.")
+    await update.message.reply_text(summary or "No data for today yet.", parse_mode="Markdown")
 
 
 async def copy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -242,7 +248,7 @@ async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if goals:
             context.user_data["macro_goals"] = goals
 
-    msg = await update.message.reply_text("Loading 7-day history...")
+    msg = await update.message.reply_text("\U0001F4C8 Loading 7-day history...")
 
     today = date.today()
     days = []
@@ -252,4 +258,4 @@ async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         days.append({"date": d.isoformat(), "totals": totals})
 
     text = format_history(days, goals or {})
-    await msg.edit_text(text)
+    await msg.edit_text(text, parse_mode="Markdown")

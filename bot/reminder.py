@@ -43,7 +43,8 @@ async def _check_daily(context: ContextTypes.DEFAULT_TYPE) -> None:
             if empty > 0:
                 await context.bot.send_message(
                     chat_id=user_id,
-                    text=f"You have {empty} meal slots not logged today. Use /today to fill them.",
+                    text=f"\U0001F514 *{empty} slots* not logged today.\nTap /today to fill them!",
+                    parse_mode="Markdown",
                 )
         except Exception:
             logger.debug("Reminder failed for user %s", user_id, exc_info=True)

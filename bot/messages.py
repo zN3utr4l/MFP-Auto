@@ -9,8 +9,8 @@ def format_day_header(date_str: str, day_index: int | None = None, total_days: i
     d = date.fromisoformat(date_str)
     day_name = d.strftime("%A")
     formatted = d.strftime("%d %B %Y")
-    progress = f" ({day_index}/{total_days})" if day_index and total_days else ""
-    return f"\U0001F4C5 {day_name} {formatted}{progress}"
+    progress = f"  ({day_index}/{total_days})" if day_index and total_days else ""
+    return f"\U0001F4C5 *{day_name} {formatted}*{progress}"
 
 
 def format_slot_message(slot: str, prediction: dict) -> str:
@@ -19,14 +19,21 @@ def format_slot_message(slot: str, prediction: dict) -> str:
     confidence = prediction["confidence"]
 
     if confidence == "none":
-        return f"{emoji} *{label}*\nNo pattern found. Use /search or skip."
+        return f"{emoji} *{label}*\n\U0001F50D No pattern yet — search or skip"
 
     if confidence == "high":
         foods = ", ".join(prediction["top"]["foods"])
-        return f"{emoji} *{label}*\n{foods}"
+        si = prediction.get("top", {}).get("serving_info", {})
+        if isinstance(si, list) and si:
+            si = si[0]
+        if isinstance(si, dict) and si.get("servings") and si.get("serving_unit"):
+            qty = f" ({si['servings']} {si['serving_unit']})"
+        else:
+            qty = ""
+        return f"{emoji} *{label}*\n{foods}{qty}"
 
-    # Low confidence — show alternatives
-    lines = [f"{emoji} *{label}*", "Choose:"]
+    # Low confidence — show numbered alternatives
+    lines = [f"{emoji} *{label}*\nPick one:"]
     for i, alt in enumerate(prediction["alternatives"], 1):
         foods = ", ".join(alt["foods"])
         lines.append(f"  {i}. {foods}")
@@ -36,55 +43,62 @@ def format_slot_message(slot: str, prediction: dict) -> str:
 def format_day_summary(date_str: str, confirmed: int, skipped: int, total: int) -> str:
     d = date.fromisoformat(date_str)
     day_name = d.strftime("%A")
-    return f"\u2705 {day_name} done! {confirmed} logged, {skipped} skipped ({total} slots)"
+    parts = [f"\U0001F3C1 *{day_name} done!*"]
+    parts.append(f"\u2705 {confirmed} logged")
+    if skipped:
+        parts.append(f"\u23ED {skipped} skipped")
+    return "\n".join(parts)
 
 
 def format_macro_summary(totals: dict, goals: dict) -> str:
-    """Format a macro progress summary comparing current totals to goals.
-
-    Returns empty string if goals are not available.
-    """
     if not goals or not goals.get("calories"):
         return ""
 
     lines = []
     over_any = False
 
-    for label, key, unit in [
-        ("Cal", "calories", ""),
-        ("Protein", "protein", "g"),
-        ("Carbs", "carbs", "g"),
-        ("Fat", "fat", "g"),
+    for emoji, label, key, unit in [
+        ("\U0001F525", "Cal", "calories", ""),
+        ("\U0001F4AA", "Pro", "protein", "g"),
+        ("\U0001F35E", "Carb", "carbs", "g"),
+        ("\U0001FAD2", "Fat", "fat", "g"),
     ]:
         current = totals.get(key, 0)
         goal = goals.get(key, 0)
         if goal <= 0:
             continue
 
-        pct = current / goal * 100
         remaining = goal - current
+        bar = _progress_bar(current, goal)
 
         if current > goal:
             over_any = True
-            lines.append(f"  {label}: {current:.0f}/{goal:.0f}{unit} (+{-remaining:.0f} over)")
-        elif pct >= 90:
-            lines.append(f"  {label}: {current:.0f}/{goal:.0f}{unit} ({remaining:.0f} left)")
+            lines.append(f"{emoji} {label}: {current:.0f}/{goal:.0f}{unit} {bar} *+{-remaining:.0f} over*")
+        elif remaining <= goal * 0.1:
+            lines.append(f"{emoji} {label}: {current:.0f}/{goal:.0f}{unit} {bar} _{remaining:.0f} left_")
         else:
-            lines.append(f"  {label}: {current:.0f}/{goal:.0f}{unit}")
+            lines.append(f"{emoji} {label}: {current:.0f}/{goal:.0f}{unit} {bar}")
 
     if not lines:
         return ""
 
-    header = "Daily macros:" if not over_any else "Daily macros (adjust next meals):"
+    header = "\U0001F4CA *Daily macros:*" if not over_any else "\u26A0 *Macros — adjust next meals:*"
     return header + "\n" + "\n".join(lines)
 
 
+def _progress_bar(current: float, goal: float, length: int = 8) -> str:
+    if goal <= 0:
+        return ""
+    ratio = min(current / goal, 1.0)
+    filled = round(ratio * length)
+    return "\u2588" * filled + "\u2591" * (length - filled)
+
+
 def format_history(days: list[dict], goals: dict) -> str:
-    """Format a 7-day macro history with averages."""
     if not days:
         return "No data available."
 
-    lines = ["Weekly history:"]
+    lines = ["\U0001F4C8 *Weekly history:*\n"]
     sum_cal, sum_p, sum_c, sum_f = 0.0, 0.0, 0.0, 0.0
 
     for day in days:
@@ -96,27 +110,30 @@ def format_history(days: list[dict], goals: dict) -> str:
         sum_c += c
         sum_f += f
 
-        over = False
-        on_target = False
+        marker = ""
         if goals and goals.get("calories"):
             over = (cal > goals["calories"] * 1.05 or p > goals["protein"] * 1.05
                     or c > goals["carbs"] * 1.05 or f > goals["fat"] * 1.05)
-            if not over:
-                on_target = cal >= goals["calories"] * 0.95 and p >= goals["protein"] * 0.95
+            on_target = (not over and cal >= goals["calories"] * 0.95
+                         and p >= goals["protein"] * 0.95)
+            marker = " \u274C" if over else (" \u2705" if on_target else "")
 
-        marker = " over" if over else (" ok" if on_target else "")
-        lines.append(f"  {d.strftime('%a %d')}: {cal:.0f} cal | P:{p:.0f} C:{c:.0f} F:{f:.0f}{marker}")
+        lines.append(f"`{d.strftime('%a %d')}` {cal:.0f} cal | P:{p:.0f} C:{c:.0f} F:{f:.0f}{marker}")
 
     n = len(days)
-    lines.append(f"\nAverage: {sum_cal/n:.0f} cal | P:{sum_p/n:.0f} C:{sum_c/n:.0f} F:{sum_f/n:.0f}")
+    lines.append(f"\n*Avg:* {sum_cal/n:.0f} cal | P:{sum_p/n:.0f} C:{sum_c/n:.0f} F:{sum_f/n:.0f}")
     if goals and goals.get("calories"):
-        lines.append(f"Target:  {goals['calories']:.0f} cal | P:{goals['protein']:.0f} C:{goals['carbs']:.0f} F:{goals['fat']:.0f}")
+        lines.append(
+            f"*Goal:* {goals['calories']:.0f} cal | P:{goals['protein']:.0f} "
+            f"C:{goals['carbs']:.0f} F:{goals['fat']:.0f}"
+        )
 
     return "\n".join(lines)
 
 
-def format_status_line(date_str: str, logged: int, pending: int, skipped: int) -> str:
+def format_status_line(date_str: str, logged: int, pending: int) -> str:
     d = date.fromisoformat(date_str)
     day_name = d.strftime("%a")
-    status = "\u2705" if pending == 0 else "\u23F3"
-    return f"{status} {day_name} {date_str}: {logged} logged, {pending} pending, {skipped} skipped"
+    if pending == 0:
+        return f"\u2705 `{day_name} {date_str}` {logged} logged"
+    return f"\u23F3 `{day_name} {date_str}` {logged}/{logged + pending} slots"

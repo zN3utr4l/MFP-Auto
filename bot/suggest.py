@@ -48,10 +48,10 @@ async def suggest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     }
 
     if remaining["calories"] <= 0:
-        await update.message.reply_text("You've already hit your calorie goal for today!")
+        await update.message.reply_text("\U0001F3AF You've hit your calorie goal for today!")
         return
 
-    msg = await update.message.reply_text("Analyzing your foods...")
+    msg = await update.message.reply_text("\U0001F50D Analyzing your foods...")
 
     db = context.bot_data["db"]
     user_id = update.effective_user.id
@@ -77,24 +77,28 @@ async def suggest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     suggestions = _filter_suggestions(foods_with_nutrition, remaining)
 
+    remaining_text = (
+        f"\U0001F4CA *Budget left:*\n"
+        f"\U0001F525 {remaining['calories']:.0f} cal  "
+        f"\U0001F4AA {remaining['protein']:.0f}g P  "
+        f"\U0001F35E {remaining['carbs']:.0f}g C  "
+        f"\U0001FAD2 {remaining['fat']:.0f}g F"
+    )
+
     if not suggestions:
         await msg.edit_text(
-            f"Remaining: {remaining['calories']:.0f} cal, {remaining['protein']:.0f}g P, "
-            f"{remaining['carbs']:.0f}g C, {remaining['fat']:.0f}g F\n\n"
-            "No foods from your history fit. Try /today to search manually."
+            f"{remaining_text}\n\n"
+            "No foods from your history fit. Try /today to search manually.",
+            parse_mode="Markdown",
         )
         return
 
-    lines = [
-        f"Remaining: {remaining['calories']:.0f} cal, {remaining['protein']:.0f}g P, "
-        f"{remaining['carbs']:.0f}g C, {remaining['fat']:.0f}g F\n",
-        "Suggested from your foods:",
-    ]
+    lines = [remaining_text, "", "\U0001F37D *Suggested:*"]
     for i, s in enumerate(suggestions, 1):
         n = s["nutrition"]
         lines.append(
-            f"  {i}. {s['name']} ({n['calories']:.0f} cal, "
-            f"{n['protein']:.0f}g P, {n['carbs']:.0f}g C, {n['fat']:.0f}g F)"
+            f"{i}. *{s['name']}*\n"
+            f"    {n['calories']:.0f} cal | P:{n['protein']:.0f} C:{n['carbs']:.0f} F:{n['fat']:.0f}"
         )
 
-    await msg.edit_text("\n".join(lines))
+    await msg.edit_text("\n".join(lines), parse_mode="Markdown")
