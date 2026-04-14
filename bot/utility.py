@@ -278,3 +278,47 @@ async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     text = format_history(days, goals or {})
     await msg.edit_text(text, parse_mode="Markdown")
+
+
+async def patterns_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from bot.daily import _clean_food_name
+    from config import MEAL_SLOT_LABELS
+    from db.database import get_meal_patterns
+
+    db = context.bot_data["db"]
+    user_id = update.effective_user.id
+    today = date.today()
+    day_type = "weekend" if today.weekday() >= 5 else "weekday"
+
+    lines = [f"\U0001F4D6 *Your patterns* ({day_type})\n"]
+    total = 0
+
+    for slot in MEAL_SLOTS:
+        emoji = MEAL_SLOT_EMOJIS.get(slot, "")
+        label = MEAL_SLOT_LABELS.get(slot, slot)
+        patterns = await get_meal_patterns(db, user_id, slot, day_type)
+
+        if not patterns:
+            lines.append(f"{emoji} *{label}*  _no patterns yet_\n")
+            continue
+
+        # Calculate total weight for percentages
+        total_weight = sum(p.weight for p in patterns)
+        lines.append(f"{emoji} *{label}*  ({len(patterns)} patterns)")
+
+        for i, p in enumerate(patterns[:5]):
+            foods = [_clean_food_name(f) for f in p.get_food_combo_list()]
+            food_str = ", ".join(foods)
+            pct = p.weight / total_weight * 100 if total_weight > 0 else 0
+            rank = "\U0001F947" if i == 0 else ("\U0001F948" if i == 1 else ("\U0001F949" if i == 2 else "  "))
+            lines.append(f"  {rank} {food_str}  _{pct:.0f}%_")
+            total += 1
+
+        if len(patterns) > 5:
+            lines.append(f"  _...+{len(patterns) - 5} more_")
+        lines.append("")
+
+    if total == 0:
+        lines.append("_No patterns yet. Use /import or /today to start building them._")
+
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
