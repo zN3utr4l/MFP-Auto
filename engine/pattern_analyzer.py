@@ -18,9 +18,9 @@ def _weeks_since(ref_date: str, now: date | None = None) -> float:
     return max(delta.days / 7.0, 0)
 
 
-def _day_type(day_of_week: int) -> str:
+def _day_type(day_of_week) -> str:
     """Return 'weekday' or 'weekend'."""
-    return "weekend" if day_of_week >= 5 else "weekday"
+    return "weekend" if int(day_of_week) >= 5 else "weekday"
 
 
 async def analyze_history(db: aiosqlite.Connection, telegram_user_id: int) -> int:

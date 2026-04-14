@@ -140,13 +140,26 @@ class TursoDb:
     def execute(self, sql: str, params: tuple = ()) -> _ExecuteProxy:
         return _ExecuteProxy(self._do_execute(sql, params))
 
+    @staticmethod
+    def _convert_cell(cell: dict):
+        """Convert Turso cell to Python type based on the type field."""
+        t = cell.get("type", "text")
+        v = cell.get("value")
+        if v is None or t == "null":
+            return None
+        if t == "integer":
+            return int(v)
+        if t == "float":
+            return float(v)
+        return v  # text, blob
+
     async def _do_execute(self, sql: str, params: tuple) -> _Cursor:
         result = await self._raw_execute(sql, list(params))
         cols = [c.get("name", "") for c in result.get("cols", [])]
         rows_raw = result.get("rows", [])
         rows = []
         for r in rows_raw:
-            row = tuple(cell.get("value") for cell in r)
+            row = tuple(self._convert_cell(cell) for cell in r)
             rows.append(row)
         last_id = result.get("last_insert_rowid")
         return _Cursor(cols, rows, int(last_id) if last_id is not None else None)
