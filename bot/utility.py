@@ -302,23 +302,41 @@ async def patterns_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             lines.append(f"{emoji} *{label}*  _no patterns yet_\n")
             continue
 
-        # Calculate total weight for percentages
         total_weight = sum(p.weight for p in patterns)
-        lines.append(f"{emoji} *{label}*  ({len(patterns)} patterns)")
+        lines.append(f"{emoji} *{label}*  _{len(patterns)} patterns_")
 
-        for i, p in enumerate(patterns[:5]):
-            foods = [_clean_food_name(f) for f in p.get_food_combo_list()]
-            food_str = ", ".join(foods)
+        medals = ["\U0001F947", "\U0001F948", "\U0001F949"]
+        shown = 0
+        for i, p in enumerate(patterns):
             pct = p.weight / total_weight * 100 if total_weight > 0 else 0
-            rank = "\U0001F947" if i == 0 else ("\U0001F948" if i == 1 else ("\U0001F949" if i == 2 else "  "))
-            lines.append(f"  {rank} {food_str}  _{pct:.0f}%_")
+            if pct < 2 and i >= 3:
+                break
+            if shown >= 5:
+                break
+
+            foods = [_clean_food_name(f) for f in p.get_food_combo_list()]
+            medal = medals[i] if i < 3 else "  "
+
+            # Show up to 3 foods, then "+N"
+            if len(foods) <= 3:
+                food_str = ", ".join(foods)
+            else:
+                food_str = ", ".join(foods[:3]) + f" +{len(foods) - 3}"
+
+            lines.append(f"  {medal} {food_str}  _{pct:.0f}%_")
+            shown += 1
             total += 1
 
-        if len(patterns) > 5:
-            lines.append(f"  _...+{len(patterns) - 5} more_")
+        remaining = len(patterns) - shown
+        if remaining > 0:
+            lines.append(f"  _...+{remaining} more_")
         lines.append("")
 
     if total == 0:
         lines.append("_No patterns yet. Use /import or /today to start building them._")
 
-    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+    # Telegram messages max 4096 chars
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:3950] + "\n\n_...truncated_"
+    await update.message.reply_text(text, parse_mode="Markdown")

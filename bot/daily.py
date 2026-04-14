@@ -37,23 +37,17 @@ import re
 logger = logging.getLogger(__name__)
 
 
-def _clean_food_name(name: str) -> str:
+def _clean_food_name(name: str, max_len: int = 30) -> str:
     """Clean MFP food names: 'Brand - Food (details)' → shorter readable form."""
-    # Remove "Brand - " prefix if the food name after dash is meaningful
+    # Remove "Brand - " prefix
     if " - " in name:
         parts = name.split(" - ", 1)
-        brand, food = parts[0].strip(), parts[1].strip()
-        # If brand and food are the same (e.g., "Petto di pollo - Petto di pollo (160g)")
-        if food.lower().startswith(brand.lower()):
-            name = food
-        else:
-            # Keep just the food part if it's descriptive enough
-            name = food
-    # Trim overly long parenthetical details
-    name = re.sub(r'\s*\([^)]{30,}\)', '', name)
+        name = parts[1].strip()
+    # Trim parenthetical details longer than 15 chars
+    name = re.sub(r'\s*\([^)]{15,}\)', '', name)
     # Cap length
-    if len(name) > 40:
-        name = name[:37] + "..."
+    if len(name) > max_len:
+        name = name[:max_len - 3] + "..."
     return name
 
 
