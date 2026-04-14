@@ -94,7 +94,7 @@ def _get_target_date(day_name: str) -> date:
 
 
 async def _ensure_client(update: Update, context: ContextTypes.DEFAULT_TYPE) -> MfpClient | None:
-    """Get or create MFP client. Returns None if not logged in or token expired."""
+    """Get or create MFP client from stored credentials. Returns None if not logged in."""
     client = context.user_data.get("mfp_client")
     if client:
         return client
@@ -105,14 +105,6 @@ async def _ensure_client(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return None
     token_json = decrypt_password(user.mfp_password_encrypted)
     client = MfpClient.from_auth_json(token_json)
-    try:
-        await client.validate()
-    except Exception:
-        await update.message.reply_text(
-            "Your MFP token has expired.\n"
-            "Please refresh it with /token"
-        )
-        return None
     context.user_data["mfp_client"] = client
     return client
 
