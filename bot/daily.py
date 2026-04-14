@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import secrets
 from datetime import date, timedelta
 
 from telegram import Update
@@ -32,6 +34,30 @@ DAY_NAMES = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_serving_infos(raw_serving_info: object, food_count: int) -> list[dict]:
+    if isinstance(raw_serving_info, list):
+        return [
+            item if isinstance(item, dict) else {}
+            for item in raw_serving_info[:food_count]
+        ] + ([{}] * max(food_count - len(raw_serving_info), 0))
+    if isinstance(raw_serving_info, dict) and raw_serving_info:
+        return [raw_serving_info] * food_count
+    return [{}] * food_count
+
+
+def _parse_callback_meta(parts: list[str]) -> tuple[str | None, str | None]:
+    def _looks_like_date(value: str) -> bool:
+        return len(value) == 10 and value.count("-") == 2
+
+    if not parts:
+        return None, None
+    if _looks_like_date(parts[-1]):
+        return parts[-1], None
+    if len(parts) >= 2 and _looks_like_date(parts[-2]):
+        return parts[-2], parts[-1]
+    return None, None
 
 
 async def _send_macro_update(update: Update, context: ContextTypes.DEFAULT_TYPE, target_date: date) -> None:
@@ -103,13 +129,14 @@ async def _send_slot(
     """Send a single slot message with appropriate keyboard."""
     text = format_slot_message(slot, prediction)
     ds = target_date.isoformat()
+    flow_id = context.user_data.get("current_day", {}).get("flow_id", "")
 
     if prediction["confidence"] == "high":
-        kb = slot_keyboard_high(slot, prediction["top"]["pattern_id"], ds)
+        kb = slot_keyboard_high(slot, prediction["top"]["pattern_id"], ds, flow_id)
     elif prediction["confidence"] == "low":
-        kb = slot_keyboard_low(slot, prediction["alternatives"], ds)
+        kb = slot_keyboard_low(slot, prediction["alternatives"], ds, flow_id)
     else:
-        kb = slot_keyboard_none(slot, ds)
+        kb = slot_keyboard_none(slot, ds, flow_id)
 
     # Store context for callback handlers
     context.user_data.setdefault("current_day", {})
@@ -192,7 +219,7 @@ async def start_day_flow(
     """Start the slot-by-slot flow for a single day."""
     # Clear any running setup/search state to prevent flow collision
     for key in ("setup", "setup_search_slot", "setup_search_results", "setup_pending_food",
-                "setup_pending_custom_qty", "search_slot"):
+                "setup_pending_custom_qty", "search_slot", "search_results"):
         context.user_data.pop(key, None)
 
     db = context.bot_data["db"]
@@ -205,10 +232,12 @@ async def start_day_flow(
         mfp_filled = await _fetch_mfp_filled_slots(client, target_date)
 
     predictions = await predict_day(db, user_id, target_date)
+    flow_id = secrets.token_hex(4)
 
     # Store all predictions for this day
     context.user_data["current_day"] = {
         "date": target_date.isoformat(),
+        "flow_id": flow_id,
         "all_predictions": predictions,
         "predictions": {},
         "current_slot_idx": -1,
@@ -278,20 +307,23 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     action = parts[0]
     slot = parts[1] if len(parts) > 1 else ""
 
-    # Extract date from callback (last part if it looks like YYYY-MM-DD)
-    cb_date = None
-    if parts and len(parts[-1]) == 10 and parts[-1].count("-") == 2:
-        cb_date = parts[-1]
+    cb_date, cb_flow_id = _parse_callback_meta(parts)
 
     day_data = context.user_data.get("current_day", {})
     target_date = day_data.get("date", date.today().isoformat())
+    current_flow_id = day_data.get("flow_id")
 
-    # Stale callback guard: if button carries a date that doesn't match current flow, reject
-    if cb_date and cb_date != target_date:
+    # Stale callback guard: reject buttons from an older flow, even on the same date.
+    if ((cb_date and cb_date != target_date)
+            or (current_flow_id and cb_flow_id != current_flow_id)
+            or (cb_flow_id and not current_flow_id)):
         await query.edit_message_text("This button has expired. Use /today to start a new flow.")
         return
 
     predictions = day_data.get("all_predictions", {})
+    if slot not in predictions:
+        await query.edit_message_text("This button has expired. Use /today to start a new flow.")
+        return
     prediction = predictions.get(slot, {})
 
     if action == "confirm":
@@ -299,17 +331,11 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         top = prediction.get("top", {})
         foods = top.get("foods", [])
         mfp_ids = top.get("mfp_ids", [])
-        raw_si = top.get("serving_info", {})
-        # serving_info can be a list (per-food) or a dict (legacy single)
-        if isinstance(raw_si, list):
-            serving_infos = raw_si
-        elif isinstance(raw_si, dict) and raw_si:
-            serving_infos = [raw_si] * len(foods)
-        else:
-            serving_infos = [{}] * len(foods)
+        serving_infos = _extract_serving_infos(top.get("serving_info", {}), len(foods))
 
         # Save to history
         parsed_date = date.fromisoformat(target_date)
+        sync_failed = False
         for i, (food, mfp_id) in enumerate(zip(foods, mfp_ids)):
             si = serving_infos[i] if i < len(serving_infos) else {}
             entry = MealEntry(
@@ -320,6 +346,7 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 food_name=food,
                 quantity="",
                 mfp_food_id=str(mfp_id),
+                serving_info=json.dumps(si),
                 source="bot_confirm",
                 synced_to_mfp=False,
             )
@@ -334,13 +361,18 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                                            serving_size_index=si.get("serving_size_index"))
                     await mark_entry_synced(db, entry_id)
                 except Exception:
-                    pass  # stays unsynced, user can /retry later
+                    sync_failed = True  # stays unsynced, user can /retry later
 
         await on_confirm(db, pattern_id, target_date)
 
         day_data["confirmed"] = day_data.get("confirmed", 0) + 1
-        await query.edit_message_text(f"\u2705 {', '.join(foods)} logged!")
-        await _send_macro_update(update, context, parsed_date)
+        if sync_failed:
+            await query.edit_message_text(
+                f"\u26A0 {', '.join(foods)} saved locally, but MFP sync failed. Use /retry."
+            )
+        else:
+            await query.edit_message_text(f"\u2705 {', '.join(foods)} logged!")
+            await _send_macro_update(update, context, parsed_date)
 
         # Send next slot
         has_next = await _send_next_slot(update, context)
@@ -363,7 +395,10 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             return
 
         parsed_date = date.fromisoformat(target_date)
-        for food, mfp_id in zip(picked["foods"], picked["mfp_ids"]):
+        serving_infos = _extract_serving_infos(picked.get("serving_info", {}), len(picked["foods"]))
+        sync_failed = False
+        for i, (food, mfp_id) in enumerate(zip(picked["foods"], picked["mfp_ids"])):
+            si = serving_infos[i] if i < len(serving_infos) else {}
             entry = MealEntry(
                 telegram_user_id=user_id,
                 date=target_date,
@@ -372,6 +407,7 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 food_name=food,
                 quantity="",
                 mfp_food_id=str(mfp_id),
+                serving_info=json.dumps(si),
                 source="bot_confirm",
                 synced_to_mfp=False,
             )
@@ -379,17 +415,29 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             client = context.user_data.get("mfp_client")
             if client:
                 try:
-                    await client.add_entry(target_date, slot, food, str(mfp_id))
+                    await client.add_entry(
+                        target_date,
+                        slot,
+                        food,
+                        str(mfp_id),
+                        servings=si.get("servings", 1.0),
+                        serving_size_index=si.get("serving_size_index"),
+                    )
                     await mark_entry_synced(db, entry_id)
                 except Exception:
-                    pass
+                    sync_failed = True
 
         day_type = "weekend" if parsed_date.weekday() >= 5 else "weekday"
         await on_replace(db, user_id, slot, day_type, picked["foods"], picked["mfp_ids"], target_date)
 
         day_data["confirmed"] = day_data.get("confirmed", 0) + 1
-        await query.edit_message_text(f"\u2705 {', '.join(picked['foods'])} logged!")
-        await _send_macro_update(update, context, parsed_date)
+        if sync_failed:
+            await query.edit_message_text(
+                f"\u26A0 {', '.join(picked['foods'])} saved locally, but MFP sync failed. Use /retry."
+            )
+        else:
+            await query.edit_message_text(f"\u2705 {', '.join(picked['foods'])} logged!")
+            await _send_macro_update(update, context, parsed_date)
 
         has_next = await _send_next_slot(update, context)
         if not has_next:
@@ -413,7 +461,7 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 {"foods": p.get_food_combo_list(), "mfp_ids": p.get_mfp_food_ids_list(), "pattern_id": p.id}
                 for p in patterns[:5]
             ]
-        kb = alternatives_keyboard(slot, alts, target_date)
+        kb = alternatives_keyboard(slot, alts, target_date, current_flow_id or "")
         await query.edit_message_text(f"Alternatives for {slot}:", reply_markup=kb)
 
     elif action == "skip":
@@ -457,23 +505,30 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             food_name=details["name"],
             quantity="",
             mfp_food_id=str(mfp_id),
+            serving_info=json.dumps({}),
             source="bot_search",
             synced_to_mfp=False,
         )
         entry_id = await save_meal_entry(db, entry)
+        sync_failed = False
         if client:
             try:
                 await client.add_entry(target_date, slot, details["name"], str(mfp_id))
                 await mark_entry_synced(db, entry_id)
             except Exception:
-                pass
+                sync_failed = True
 
         day_type = "weekend" if parsed_date.weekday() >= 5 else "weekday"
         await on_replace(db, user_id, slot, day_type, [details["name"]], [str(mfp_id)], target_date)
 
         day_data["confirmed"] = day_data.get("confirmed", 0) + 1
-        await query.edit_message_text(f"\u2705 {details['name']} logged!")
-        await _send_macro_update(update, context, parsed_date)
+        if sync_failed:
+            await query.edit_message_text(
+                f"\u26A0 {details['name']} saved locally, but MFP sync failed. Use /retry."
+            )
+        else:
+            await query.edit_message_text(f"\u2705 {details['name']} logged!")
+            await _send_macro_update(update, context, parsed_date)
 
         has_next = await _send_next_slot(update, context)
         if not has_next:
@@ -514,8 +569,9 @@ async def search_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     day_data = context.user_data.get("current_day", {})
     ds = day_data.get("date", "")
+    flow_id = day_data.get("flow_id", "")
     # Cache search results for search_pick callback
     context.user_data["search_results"] = {str(r["mfp_id"]): r for r in results[:5]}
-    kb = search_results_keyboard(search_slot, results, ds)
+    kb = search_results_keyboard(search_slot, results, ds, flow_id)
     await update.message.reply_text(f"Results for '{query_text}':", reply_markup=kb)
     context.user_data.pop("search_slot", None)

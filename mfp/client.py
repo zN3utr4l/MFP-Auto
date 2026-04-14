@@ -375,8 +375,8 @@ class MfpClient:
     async def search_food(self, query: str) -> list[dict]:
         return await asyncio.to_thread(self.search_food_sync, query)
 
-    async def get_food_details(self, mfp_id: int) -> dict | None:
-        return await asyncio.to_thread(self.get_food_details_sync, mfp_id)
+    async def get_food_details(self, mfp_id: int, hint_name: str = "") -> dict | None:
+        return await asyncio.to_thread(self.get_food_details_sync, mfp_id, hint_name)
 
     async def add_entry(self, date_str: str, meal_name: str, food_name: str, mfp_food_id: str,
                         servings: float = 1.0, serving_size_index: int | None = None) -> bool:

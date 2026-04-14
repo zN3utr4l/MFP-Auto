@@ -24,6 +24,7 @@ class MealEntry:
     food_name: str
     quantity: str
     mfp_food_id: str = ""
+    serving_info: str = "{}"
     source: str = "bot_confirm"  # mfp_scrape | bot_confirm | bot_search
     synced_to_mfp: bool = False
     id: int | None = None

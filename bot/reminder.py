@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, time, timezone, timedelta
+from datetime import date, time
+from zoneinfo import ZoneInfo
 
 from telegram.ext import Application, ContextTypes
 
 from config import MEAL_SLOTS, REMINDER_HOUR
 from db.database import get_meal_entries
 
-# Italy is UTC+1 (CET) or UTC+2 (CEST). Use +2 for summer, close enough year-round.
-_ITALY_TZ = timezone(timedelta(hours=2))
+_ITALY_TZ = ZoneInfo("Europe/Rome")
 
 logger = logging.getLogger(__name__)
 

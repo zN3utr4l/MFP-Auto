@@ -3,8 +3,20 @@ from __future__ import annotations
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 
-def slot_keyboard_high(slot: str, pattern_id: int, date_str: str = "") -> InlineKeyboardMarkup:
-    d = f":{date_str}" if date_str else ""
+def _callback_suffix(date_str: str = "", flow_id: str = "") -> str:
+    suffix = f":{date_str}" if date_str else ""
+    if flow_id:
+        suffix += f":{flow_id}"
+    return suffix
+
+
+def slot_keyboard_high(
+    slot: str,
+    pattern_id: int,
+    date_str: str = "",
+    flow_id: str = "",
+) -> InlineKeyboardMarkup:
+    d = _callback_suffix(date_str, flow_id)
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("\u2705 Confirm", callback_data=f"confirm:{slot}:{pattern_id}{d}"),
@@ -14,8 +26,13 @@ def slot_keyboard_high(slot: str, pattern_id: int, date_str: str = "") -> Inline
     ])
 
 
-def slot_keyboard_low(slot: str, alternatives: list[dict], date_str: str = "") -> InlineKeyboardMarkup:
-    d = f":{date_str}" if date_str else ""
+def slot_keyboard_low(
+    slot: str,
+    alternatives: list[dict],
+    date_str: str = "",
+    flow_id: str = "",
+) -> InlineKeyboardMarkup:
+    d = _callback_suffix(date_str, flow_id)
     rows = []
     for alt in alternatives:
         label = ", ".join(alt["foods"])
@@ -30,8 +47,8 @@ def slot_keyboard_low(slot: str, alternatives: list[dict], date_str: str = "") -
     return InlineKeyboardMarkup(rows)
 
 
-def slot_keyboard_none(slot: str, date_str: str = "") -> InlineKeyboardMarkup:
-    d = f":{date_str}" if date_str else ""
+def slot_keyboard_none(slot: str, date_str: str = "", flow_id: str = "") -> InlineKeyboardMarkup:
+    d = _callback_suffix(date_str, flow_id)
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("\U0001F50D Search", callback_data=f"search:{slot}{d}"),
@@ -40,9 +57,14 @@ def slot_keyboard_none(slot: str, date_str: str = "") -> InlineKeyboardMarkup:
     ])
 
 
-def alternatives_keyboard(slot: str, alternatives: list[dict], date_str: str = "") -> InlineKeyboardMarkup:
+def alternatives_keyboard(
+    slot: str,
+    alternatives: list[dict],
+    date_str: str = "",
+    flow_id: str = "",
+) -> InlineKeyboardMarkup:
     """Show top 5 alternatives after user presses Change."""
-    d = f":{date_str}" if date_str else ""
+    d = _callback_suffix(date_str, flow_id)
     rows = []
     for alt in alternatives:
         label = ", ".join(alt["foods"])
@@ -57,8 +79,13 @@ def alternatives_keyboard(slot: str, alternatives: list[dict], date_str: str = "
     return InlineKeyboardMarkup(rows)
 
 
-def search_results_keyboard(slot: str, results: list[dict], date_str: str = "") -> InlineKeyboardMarkup:
-    d = f":{date_str}" if date_str else ""
+def search_results_keyboard(
+    slot: str,
+    results: list[dict],
+    date_str: str = "",
+    flow_id: str = "",
+) -> InlineKeyboardMarkup:
+    d = _callback_suffix(date_str, flow_id)
     rows = []
     for r in results[:5]:
         label = r["name"]

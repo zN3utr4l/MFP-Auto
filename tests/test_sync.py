@@ -56,3 +56,31 @@ async def test_retry_unsynced_counts_failures(db):
     synced, failed = await retry_unsynced(db, mock_client, telegram_user_id=1)
     assert synced == 0
     assert failed == 1
+
+
+@pytest.mark.asyncio
+async def test_retry_unsynced_reuses_serving_info(db):
+    entry = MealEntry(
+        telegram_user_id=1,
+        date="2026-04-10",
+        day_of_week=3,
+        slot="breakfast",
+        food_name="Oats",
+        quantity="80g",
+        mfp_food_id="111",
+        source="bot_confirm",
+        synced_to_mfp=False,
+        serving_info='{"servings": 0.8, "serving_size_index": 4}',
+    )
+    await save_meal_entry(db, entry)
+
+    mock_client = MagicMock()
+    mock_client.add_entry = AsyncMock(return_value=True)
+
+    synced, failed = await retry_unsynced(db, mock_client, telegram_user_id=1)
+    assert synced == 1
+    assert failed == 0
+
+    kwargs = mock_client.add_entry.await_args.kwargs
+    assert kwargs["servings"] == 0.8
+    assert kwargs["serving_size_index"] == 4

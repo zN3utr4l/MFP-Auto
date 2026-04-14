@@ -193,3 +193,13 @@ def test_get_day_skips_empty_meals(client):
 
     assert len(result) == 1
     assert result[0]["entries"] == []  # 0 cal = no entries
+
+
+@pytest.mark.asyncio
+async def test_get_food_details_async_forwards_hint_name(client):
+    client.get_food_details_sync = MagicMock(return_value={"name": "Oatmeal", "mfp_id": 123})
+
+    result = await client.get_food_details(123, hint_name="oatmeal")
+
+    assert result == {"name": "Oatmeal", "mfp_id": 123}
+    client.get_food_details_sync.assert_called_once_with(123, "oatmeal")

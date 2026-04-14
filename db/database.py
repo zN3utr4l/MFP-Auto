@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS meals_history (
     food_name TEXT NOT NULL,
     quantity TEXT NOT NULL DEFAULT '',
     mfp_food_id TEXT NOT NULL DEFAULT '',
+    serving_info TEXT NOT NULL DEFAULT '{}',
     source TEXT NOT NULL DEFAULT 'bot_confirm',
     synced_to_mfp INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
@@ -78,7 +79,20 @@ CREATE INDEX IF NOT EXISTS idx_week_user ON week_progress(telegram_user_id, stat
 
 async def init_db(db: aiosqlite.Connection) -> None:
     await db.executescript(_CREATE_TABLES)
+    await _ensure_column(db, "meals_history", "serving_info", "TEXT NOT NULL DEFAULT '{}'")
     await db.commit()
+
+
+async def _ensure_column(
+    db: aiosqlite.Connection,
+    table: str,
+    column: str,
+    column_def: str,
+) -> None:
+    async with db.execute(f"PRAGMA table_info({table})") as cursor:
+        columns = [row["name"] async for row in cursor]
+    if column not in columns:
+        await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_def}")
 
 
 async def get_db(path: str) -> aiosqlite.Connection:
@@ -125,11 +139,11 @@ async def get_user(db: aiosqlite.Connection, telegram_user_id: int) -> User | No
 async def save_meal_entry(db: aiosqlite.Connection, entry: MealEntry) -> int:
     cursor = await db.execute(
         """INSERT INTO meals_history
-           (telegram_user_id, date, day_of_week, slot, food_name, quantity,
+           (telegram_user_id, date, day_of_week, slot, food_name, quantity, serving_info,
             mfp_food_id, source, synced_to_mfp, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (entry.telegram_user_id, entry.date, entry.day_of_week, entry.slot,
-         entry.food_name, entry.quantity, entry.mfp_food_id, entry.source,
+         entry.food_name, entry.quantity, entry.serving_info, entry.mfp_food_id, entry.source,
          int(entry.synced_to_mfp), entry.created_at),
     )
     await db.commit()
@@ -161,6 +175,7 @@ async def get_meal_entries(
                 food_name=row["food_name"],
                 quantity=row["quantity"],
                 mfp_food_id=row["mfp_food_id"],
+                serving_info=row["serving_info"],
                 source=row["source"],
                 synced_to_mfp=bool(row["synced_to_mfp"]),
                 created_at=row["created_at"],
@@ -239,6 +254,7 @@ async def get_unsynced_entries(db: aiosqlite.Connection, telegram_user_id: int) 
                 food_name=row["food_name"],
                 quantity=row["quantity"],
                 mfp_food_id=row["mfp_food_id"],
+                serving_info=row["serving_info"],
                 source=row["source"],
                 synced_to_mfp=False,
                 created_at=row["created_at"],

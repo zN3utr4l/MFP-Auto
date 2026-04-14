@@ -159,6 +159,7 @@ async def copy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     from db.models import MealEntry
 
     copied = 0
+    failed_syncs = 0
     skipped_slots = []
     slot_foods: dict[str, list[str]] = {}
 
@@ -184,6 +185,7 @@ async def copy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             food_name=entry.food_name,
             quantity=entry.quantity,
             mfp_food_id=entry.mfp_food_id,
+            serving_info=entry.serving_info,
             source="bot_confirm",
             synced_to_mfp=False,
         )
@@ -191,10 +193,24 @@ async def copy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
         if client and entry.mfp_food_id and entry.mfp_food_id not in ("", "None"):
             try:
-                await client.add_entry(today.isoformat(), entry.slot, entry.food_name, entry.mfp_food_id)
+                serving_info = {}
+                if entry.serving_info and entry.serving_info != "{}":
+                    import json
+                    try:
+                        serving_info = json.loads(entry.serving_info)
+                    except json.JSONDecodeError:
+                        serving_info = {}
+                await client.add_entry(
+                    today.isoformat(),
+                    entry.slot,
+                    entry.food_name,
+                    entry.mfp_food_id,
+                    servings=serving_info.get("servings", 1.0),
+                    serving_size_index=serving_info.get("serving_size_index"),
+                )
                 await mark_entry_synced(db, entry_id)
             except Exception:
-                pass
+                failed_syncs += 1
 
         slot_foods.setdefault(entry.slot, []).append(entry.food_name)
         copied += 1
@@ -204,9 +220,12 @@ async def copy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         lines.append(f"  {slot}: {', '.join(foods)}")
     if skipped_slots:
         lines.append(f"  Skipped (already filled): {', '.join(skipped_slots)}")
+    if failed_syncs:
+        lines.append(f"  Saved locally only: {failed_syncs} entries failed MFP sync. Use /retry")
 
     await msg.edit_text("\n".join(lines))
-    await _send_macro_update(update, context, today)
+    if not failed_syncs:
+        await _send_macro_update(update, context, today)
 
 
 async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

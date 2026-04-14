@@ -2,6 +2,7 @@ import pytest
 import pytest_asyncio
 import aiosqlite
 from datetime import date
+from types import SimpleNamespace
 
 from db.database import init_db, save_user, save_meal_entry
 from db.models import User, MealEntry
@@ -38,3 +39,23 @@ async def test_count_empty_slots_partial(db):
     await save_meal_entry(db, entry)
     count = await _count_empty_slots(db, 12345, date.today())
     assert count == 6
+
+
+def test_schedule_reminders_uses_rome_timezone():
+    from bot.reminder import schedule_reminders
+
+    run_daily = lambda *args, **kwargs: None
+    application = SimpleNamespace(job_queue=SimpleNamespace(run_daily=run_daily))
+
+    called = {}
+
+    def capture(callback, time, name):
+        called["time"] = time
+        called["name"] = name
+
+    application.job_queue.run_daily = capture
+
+    schedule_reminders(application)
+
+    assert called["name"] == "daily_reminder"
+    assert getattr(called["time"].tzinfo, "key", None) == "Europe/Rome"
