@@ -61,6 +61,24 @@ class _Cursor:
         pass
 
 
+class _ExecuteProxy:
+    """Wraps execute() so it works as both `await db.execute(...)` and `async with db.execute(...) as cursor:`."""
+
+    def __init__(self, coro):
+        self._coro = coro
+        self._cursor = None
+
+    def __await__(self):
+        return self._coro.__await__()
+
+    async def __aenter__(self):
+        self._cursor = await self._coro
+        return self._cursor
+
+    async def __aexit__(self, *args):
+        pass
+
+
 class TursoDb:
     """Async DB connection backed by Turso via libsql-client.
 
@@ -75,8 +93,10 @@ class TursoDb:
     def __init__(self, client) -> None:
         self._client = client
 
-    async def execute(self, sql: str, params: tuple = ()) -> _Cursor:
-        # libsql-client uses list params, not tuple
+    def execute(self, sql: str, params: tuple = ()) -> _ExecuteProxy:
+        return _ExecuteProxy(self._do_execute(sql, params))
+
+    async def _do_execute(self, sql: str, params: tuple) -> _Cursor:
         rs = await self._client.execute(sql, list(params))
         columns = list(rs.columns) if rs.columns else []
         rows = [tuple(r) for r in rs.rows]
