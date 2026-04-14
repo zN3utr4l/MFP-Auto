@@ -178,32 +178,39 @@ async def _send_next_slot(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def _fetch_mfp_filled_slots(client, target_date: date) -> dict[str, dict]:
     """Check which slots already have food logged on MFP.
 
-    Returns {slot: {calories, protein, carbs, fat}} for non-empty slots.
+    Returns {slot: {foods: [name, ...], calories, protein, carbs, fat}} for non-empty slots.
+    Uses get_day() which tries read_diary (individual entries) first.
     """
     from config import MFP_DEFAULT_MEALS
     filled: dict[str, dict] = {}
     try:
-        date_str = target_date.strftime("%Y-%m-%d")
-        data = await asyncio.to_thread(
-            client._api_get, "v2/diary",
-            [("entry_date", date_str), ("fields[]", "nutritional_contents")],
-        )
-        for item in data.get("items", []):
-            if item.get("type") != "diary_meal":
+        meals = await client.get_day(target_date)
+        for m in meals:
+            if not m.get("entries"):
                 continue
-            nc = item.get("nutritional_contents", {})
-            energy = nc.get("energy", {})
-            cal = energy.get("value", 0) if isinstance(energy, dict) else 0
-            if cal > 0:
-                meal_name = item.get("diary_meal", "")
-                slot = MFP_DEFAULT_MEALS.get(meal_name)
-                if slot:
-                    filled[slot] = {
-                        "calories": cal,
-                        "protein": nc.get("protein", 0),
-                        "carbs": nc.get("carbohydrates", 0),
-                        "fat": nc.get("fat", 0),
-                    }
+            meal_name = m["meal_name"]
+            slot = MFP_DEFAULT_MEALS.get(meal_name)
+            if not slot:
+                continue
+
+            food_names = []
+            total_cal, total_p, total_c, total_f = 0.0, 0.0, 0.0, 0.0
+            for entry in m["entries"]:
+                food_names.append(entry["name"])
+                nc = entry.get("nutritional_info", {})
+                energy = nc.get("energy", {})
+                total_cal += energy.get("value", 0) if isinstance(energy, dict) else 0
+                total_p += nc.get("protein", 0)
+                total_c += nc.get("carbohydrates", 0)
+                total_f += nc.get("fat", 0)
+
+            filled[slot] = {
+                "foods": food_names,
+                "calories": total_cal,
+                "protein": total_p,
+                "carbs": total_c,
+                "fat": total_f,
+            }
     except Exception:
         logger.debug("Could not check MFP diary for %s", target_date, exc_info=True)
     return filled
@@ -257,10 +264,19 @@ async def start_day_flow(
                 m = mfp_filled[slot]
                 emoji = MEAL_SLOT_EMOJIS.get(slot, "")
                 label = MEAL_SLOT_LABELS.get(slot, slot)
-                header += (
-                    f"\n  {emoji} {label}: {m['calories']:.0f} cal"
-                    f" | P:{m['protein']:.0f} C:{m['carbs']:.0f} F:{m['fat']:.0f}"
-                )
+                foods = m.get("foods", [])
+                if foods and not (len(foods) == 1 and "cal)" in foods[0]):
+                    # Show individual food names
+                    food_list = ", ".join(foods[:4])
+                    if len(foods) > 4:
+                        food_list += f" +{len(foods) - 4}"
+                    header += f"\n  {emoji} {label}: {food_list}"
+                    header += f"\n      {m['calories']:.0f} cal | P:{m['protein']:.0f} C:{m['carbs']:.0f} F:{m['fat']:.0f}"
+                else:
+                    header += (
+                        f"\n  {emoji} {label}: {m['calories']:.0f} cal"
+                        f" | P:{m['protein']:.0f} C:{m['carbs']:.0f} F:{m['fat']:.0f}"
+                    )
     await update.effective_chat.send_message(header)
 
     has_slot = await _send_next_slot(update, context)
