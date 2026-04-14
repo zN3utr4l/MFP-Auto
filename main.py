@@ -66,7 +66,7 @@ async def post_shutdown(application: Application) -> None:
 
 def main() -> None:
     from bot.daily import day_command, search_text_handler, slot_callback, today_command, tomorrow_command
-    from bot.onboarding import token_command, start_command
+    from bot.onboarding import import_callback, import_command, token_command, start_command
     from bot.setup import setup_callback, setup_command, setup_search_handler
     from bot.suggest import suggest_command
     from bot.utility import copy_command, history_command, macros_command, retry_command, status_command, undo_command
@@ -84,6 +84,7 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("token", token_command))
     application.add_handler(CommandHandler("setup", setup_command))
+    application.add_handler(CommandHandler("import", import_command))
     application.add_handler(CommandHandler("today", today_command))
     application.add_handler(CommandHandler("tomorrow", tomorrow_command))
     application.add_handler(CommandHandler("day", day_command))
@@ -97,6 +98,7 @@ def main() -> None:
     application.add_handler(CommandHandler("history", history_command))
 
     # Callback handlers — order matters (more specific patterns first)
+    application.add_handler(CallbackQueryHandler(import_callback, pattern=r"^import:"))
     application.add_handler(CallbackQueryHandler(setup_callback, pattern=r"^setup_"))
     application.add_handler(CallbackQueryHandler(week_stop_callback, pattern=r"^week:stop$"))
     application.add_handler(CallbackQueryHandler(slot_callback, pattern=r"^(confirm|change|skip|pick|search|search_pick|back):"))
