@@ -10,6 +10,8 @@ if not ENCRYPTION_KEY:
     raise ValueError("ENCRYPTION_KEY environment variable is required")
 
 DB_PATH: str = os.environ.get("DB_PATH", "data/mfp_auto.db")
+TURSO_DB_URL: str = os.environ.get("TURSO_DB_URL", "")
+TURSO_AUTH_TOKEN: str = os.environ.get("TURSO_AUTH_TOKEN", "")
 
 MEAL_SLOTS: list[str] = [
     "breakfast",

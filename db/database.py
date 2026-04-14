@@ -77,25 +77,21 @@ CREATE INDEX IF NOT EXISTS idx_week_user ON week_progress(telegram_user_id, stat
 """
 
 
-async def init_db(db: aiosqlite.Connection) -> None:
+async def init_db(db) -> None:
     await db.executescript(_CREATE_TABLES)
-    await _ensure_column(db, "meals_history", "serving_info", "TEXT NOT NULL DEFAULT '{}'")
     await db.commit()
 
 
-async def _ensure_column(
-    db: aiosqlite.Connection,
-    table: str,
-    column: str,
-    column_def: str,
-) -> None:
-    async with db.execute(f"PRAGMA table_info({table})") as cursor:
-        columns = [row["name"] async for row in cursor]
-    if column not in columns:
-        await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_def}")
+async def get_db(path: str):
+    """Connect to Turso (if configured) or local SQLite."""
+    from config import TURSO_AUTH_TOKEN, TURSO_DB_URL
 
+    if TURSO_DB_URL and TURSO_AUTH_TOKEN:
+        from db.turso_adapter import connect_turso
+        db = await connect_turso(TURSO_DB_URL, TURSO_AUTH_TOKEN)
+        await init_db(db)
+        return db
 
-async def get_db(path: str) -> aiosqlite.Connection:
     db = await aiosqlite.connect(path)
     db.row_factory = aiosqlite.Row
     await db.execute("PRAGMA journal_mode=WAL")
