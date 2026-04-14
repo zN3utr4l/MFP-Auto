@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class _Row:
-    """Dict-like row that supports both row["col"] and row[index] access."""
+    """Dict-like row that supports row["col"], row[index], dict(row), and iteration."""
 
     __slots__ = ("_columns", "_values")
 
@@ -30,6 +30,18 @@ class _Row:
 
     def keys(self):
         return self._columns
+
+    def __iter__(self):
+        return iter(self._columns)
+
+    def __len__(self):
+        return len(self._columns)
+
+    def values(self):
+        return self._values
+
+    def items(self):
+        return zip(self._columns, self._values)
 
 
 class _Cursor:
