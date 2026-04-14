@@ -259,8 +259,8 @@ async def _finish_setup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             continue
         food_names = [f["name"] for f in foods]
         food_ids = [f["mfp_id"] for f in foods]
-        # Use serving_info from the first food (main item)
-        si = foods[0].get("serving_info", {})
+        # Store per-food serving_info as a list (one entry per food)
+        serving_infos = [f.get("serving_info", {}) for f in foods]
 
         for day_type in ("weekday", "weekend"):
             pattern = MealPattern(
@@ -270,7 +270,7 @@ async def _finish_setup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 food_combo=json.dumps(food_names),
                 mfp_food_ids=json.dumps(food_ids),
                 weight=3.0,
-                serving_info=json.dumps(si),
+                serving_info=json.dumps(serving_infos),
             )
             await save_meal_pattern(db, pattern)
             total_patterns += 1

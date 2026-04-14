@@ -324,21 +324,23 @@ class MfpClient:
         version = info["version"]
         serving_sizes = info["serving_sizes"]
 
-        ss = None
-        if serving_sizes:
-            if serving_size_index is not None:
-                ss = next((s for s in serving_sizes if s.get("index") == serving_size_index), None)
-            if ss is None:
-                ss = serving_sizes[0]
+        if not serving_sizes:
+            raise ValueError(
+                f"Could not find serving sizes for '{food_name}' (id={mfp_food_id}) — "
+                "cannot build a valid MFP request"
+            )
 
-        if ss:
-            serving_size = {
-                "value": ss.get("value", 1.0),
-                "unit": ss.get("unit", "serving"),
-                "nutrition_multiplier": ss.get("nutrition_multiplier", 1.0),
-            }
-        else:
-            serving_size = {"value": 1.0, "unit": "serving", "nutrition_multiplier": 1.0}
+        ss = None
+        if serving_size_index is not None:
+            ss = next((s for s in serving_sizes if s.get("index") == serving_size_index), None)
+        if ss is None:
+            ss = serving_sizes[0]
+
+        serving_size = {
+            "value": ss.get("value", 1.0),
+            "unit": ss.get("unit", "serving"),
+            "nutrition_multiplier": ss.get("nutrition_multiplier", 1.0),
+        }
 
         meal_position = _SLOT_TO_MEAL_POSITION.get(meal_name, 3)
 

@@ -162,9 +162,16 @@ async def copy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     skipped_slots = []
     slot_foods: dict[str, list[str]] = {}
 
+    # Pre-check which slots are already filled today (check once per slot)
+    already_filled: set[str] = set()
     for entry in source_entries:
-        existing = await get_meal_entries(db, user_id, today.isoformat(), entry.slot)
-        if existing:
+        if entry.slot not in already_filled:
+            existing = await get_meal_entries(db, user_id, today.isoformat(), entry.slot)
+            if existing:
+                already_filled.add(entry.slot)
+
+    for entry in source_entries:
+        if entry.slot in already_filled:
             if entry.slot not in skipped_slots:
                 skipped_slots.append(entry.slot)
             continue

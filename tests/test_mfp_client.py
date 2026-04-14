@@ -130,10 +130,22 @@ def test_search_food_returns_serving_sizes_and_nutrition(client):
 
 def test_add_entry_posts_to_diary(client):
     """add_entry_sync sends correct payload to POST /v2/diary."""
-    mock_resp = MagicMock()
-    mock_resp.json.return_value = {"items": [{"id": "abc"}]}
-    mock_resp.raise_for_status = MagicMock()
-    client.session.post = MagicMock(return_value=mock_resp)
+    # Mock the lookup (GET) to return serving_sizes
+    lookup_resp = MagicMock()
+    lookup_resp.json.return_value = {"items": [{"item": {
+        "id": "12345", "version": "v1",
+        "serving_sizes": [{"index": 0, "value": 1.0, "unit": "medium", "nutrition_multiplier": 1.0}],
+    }}]}
+    lookup_resp.raise_for_status = MagicMock()
+
+    # Mock the POST
+    post_resp = MagicMock()
+    post_resp.json.return_value = {"items": [{"id": "abc"}]}
+    post_resp.raise_for_status = MagicMock()
+    post_resp.ok = True
+
+    client.session.get = MagicMock(return_value=lookup_resp)
+    client.session.post = MagicMock(return_value=post_resp)
 
     result = client.add_entry_sync("2026-04-13", "breakfast", "Oatmeal", "12345")
 

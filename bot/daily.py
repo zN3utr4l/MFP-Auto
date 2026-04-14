@@ -102,13 +102,14 @@ async def _send_slot(
 ) -> None:
     """Send a single slot message with appropriate keyboard."""
     text = format_slot_message(slot, prediction)
+    ds = target_date.isoformat()
 
     if prediction["confidence"] == "high":
-        kb = slot_keyboard_high(slot, prediction["top"]["pattern_id"])
+        kb = slot_keyboard_high(slot, prediction["top"]["pattern_id"], ds)
     elif prediction["confidence"] == "low":
-        kb = slot_keyboard_low(slot, prediction["alternatives"])
+        kb = slot_keyboard_low(slot, prediction["alternatives"], ds)
     else:
-        kb = slot_keyboard_none(slot)
+        kb = slot_keyboard_none(slot, ds)
 
     # Store context for callback handlers
     context.user_data.setdefault("current_day", {})
@@ -189,6 +190,11 @@ async def start_day_flow(
     total_days: int | None = None,
 ) -> None:
     """Start the slot-by-slot flow for a single day."""
+    # Clear any running setup/search state to prevent flow collision
+    for key in ("setup", "setup_search_slot", "setup_search_results", "setup_pending_food",
+                "setup_pending_custom_qty", "search_slot"):
+        context.user_data.pop(key, None)
+
     db = context.bot_data["db"]
     user_id = update.effective_user.id
 
@@ -272,8 +278,19 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     action = parts[0]
     slot = parts[1] if len(parts) > 1 else ""
 
+    # Extract date from callback (last part if it looks like YYYY-MM-DD)
+    cb_date = None
+    if parts and len(parts[-1]) == 10 and parts[-1].count("-") == 2:
+        cb_date = parts[-1]
+
     day_data = context.user_data.get("current_day", {})
     target_date = day_data.get("date", date.today().isoformat())
+
+    # Stale callback guard: if button carries a date that doesn't match current flow, reject
+    if cb_date and cb_date != target_date:
+        await query.edit_message_text("This button has expired. Use /today to start a new flow.")
+        return
+
     predictions = day_data.get("all_predictions", {})
     prediction = predictions.get(slot, {})
 
@@ -282,13 +299,19 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         top = prediction.get("top", {})
         foods = top.get("foods", [])
         mfp_ids = top.get("mfp_ids", [])
-        si = top.get("serving_info", {})
-        servings_val = si.get("servings", 1.0)
-        ss_index = si.get("serving_size_index")
+        raw_si = top.get("serving_info", {})
+        # serving_info can be a list (per-food) or a dict (legacy single)
+        if isinstance(raw_si, list):
+            serving_infos = raw_si
+        elif isinstance(raw_si, dict) and raw_si:
+            serving_infos = [raw_si] * len(foods)
+        else:
+            serving_infos = [{}] * len(foods)
 
         # Save to history
         parsed_date = date.fromisoformat(target_date)
-        for food, mfp_id in zip(foods, mfp_ids):
+        for i, (food, mfp_id) in enumerate(zip(foods, mfp_ids)):
+            si = serving_infos[i] if i < len(serving_infos) else {}
             entry = MealEntry(
                 telegram_user_id=user_id,
                 date=target_date,
@@ -307,7 +330,8 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             if client:
                 try:
                     await client.add_entry(target_date, slot, food, str(mfp_id),
-                                           servings=servings_val, serving_size_index=ss_index)
+                                           servings=si.get("servings", 1.0),
+                                           serving_size_index=si.get("serving_size_index"))
                     await mark_entry_synced(db, entry_id)
                 except Exception:
                     pass  # stays unsynced, user can /retry later
@@ -389,7 +413,7 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 {"foods": p.get_food_combo_list(), "mfp_ids": p.get_mfp_food_ids_list(), "pattern_id": p.id}
                 for p in patterns[:5]
             ]
-        kb = alternatives_keyboard(slot, alts)
+        kb = alternatives_keyboard(slot, alts, target_date)
         await query.edit_message_text(f"Alternatives for {slot}:", reply_markup=kb)
 
     elif action == "skip":
@@ -412,46 +436,54 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     elif action == "search_pick":
         mfp_id = parts[2]
-        # Look up food details
+        # Use cached search results (avoids unreliable get_food_details lookup)
+        cached = context.user_data.get("search_results", {})
+        details = cached.get(str(mfp_id))
+        if not details:
+            client = context.user_data.get("mfp_client")
+            if client:
+                details = await client.get_food_details(int(mfp_id), hint_name=str(mfp_id))
+        if not details:
+            await query.edit_message_text("Could not find food details. Try searching again.")
+            return
+
         client = context.user_data.get("mfp_client")
+        parsed_date = date.fromisoformat(target_date)
+        entry = MealEntry(
+            telegram_user_id=user_id,
+            date=target_date,
+            day_of_week=parsed_date.weekday(),
+            slot=slot,
+            food_name=details["name"],
+            quantity="",
+            mfp_food_id=str(mfp_id),
+            source="bot_search",
+            synced_to_mfp=False,
+        )
+        entry_id = await save_meal_entry(db, entry)
         if client:
-            details = await client.get_food_details(int(mfp_id))
-            if details:
-                parsed_date = date.fromisoformat(target_date)
-                entry = MealEntry(
-                    telegram_user_id=user_id,
-                    date=target_date,
-                    day_of_week=parsed_date.weekday(),
-                    slot=slot,
-                    food_name=details["name"],
-                    quantity="",
-                    mfp_food_id=str(mfp_id),
-                    source="bot_search",
-                    synced_to_mfp=False,
-                )
-                entry_id = await save_meal_entry(db, entry)
-                try:
-                    await client.add_entry(target_date, slot, details["name"], str(mfp_id))
-                    await mark_entry_synced(db, entry_id)
-                except Exception:
-                    pass
+            try:
+                await client.add_entry(target_date, slot, details["name"], str(mfp_id))
+                await mark_entry_synced(db, entry_id)
+            except Exception:
+                pass
 
-                day_type = "weekend" if parsed_date.weekday() >= 5 else "weekday"
-                await on_replace(db, user_id, slot, day_type, [details["name"]], [str(mfp_id)], target_date)
+        day_type = "weekend" if parsed_date.weekday() >= 5 else "weekday"
+        await on_replace(db, user_id, slot, day_type, [details["name"]], [str(mfp_id)], target_date)
 
-                day_data["confirmed"] = day_data.get("confirmed", 0) + 1
-                await query.edit_message_text(f"\u2705 {details['name']} logged!")
-                await _send_macro_update(update, context, parsed_date)
+        day_data["confirmed"] = day_data.get("confirmed", 0) + 1
+        await query.edit_message_text(f"\u2705 {details['name']} logged!")
+        await _send_macro_update(update, context, parsed_date)
 
-                has_next = await _send_next_slot(update, context)
-                if not has_next:
-                    summary = format_day_summary(
-                        target_date, day_data["confirmed"], day_data.get("skipped", 0), len(MEAL_SLOTS)
-                    )
-                    await update.effective_chat.send_message(summary)
-                    if "week_mode" in context.user_data:
-                        from bot.week import advance_week
-                        await advance_week(update, context)
+        has_next = await _send_next_slot(update, context)
+        if not has_next:
+            summary = format_day_summary(
+                target_date, day_data["confirmed"], day_data.get("skipped", 0), len(MEAL_SLOTS)
+            )
+            await update.effective_chat.send_message(summary)
+            if "week_mode" in context.user_data:
+                from bot.week import advance_week
+                await advance_week(update, context)
 
     elif action == "back":
         # Re-send original slot
@@ -480,6 +512,10 @@ async def search_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(f"No results for '{query_text}'. Try again:")
         return
 
-    kb = search_results_keyboard(search_slot, results)
+    day_data = context.user_data.get("current_day", {})
+    ds = day_data.get("date", "")
+    # Cache search results for search_pick callback
+    context.user_data["search_results"] = {str(r["mfp_id"]): r for r in results[:5]}
+    kb = search_results_keyboard(search_slot, results, ds)
     await update.message.reply_text(f"Results for '{query_text}':", reply_markup=kb)
     context.user_data.pop("search_slot", None)

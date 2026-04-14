@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, time
+from datetime import date, time, timezone, timedelta
 
 from telegram.ext import Application, ContextTypes
 
 from config import MEAL_SLOTS, REMINDER_HOUR
 from db.database import get_meal_entries
+
+# Italy is UTC+1 (CET) or UTC+2 (CEST). Use +2 for summer, close enough year-round.
+_ITALY_TZ = timezone(timedelta(hours=2))
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +56,6 @@ def schedule_reminders(application: Application) -> None:
         return
     application.job_queue.run_daily(
         _check_daily,
-        time=time(hour=REMINDER_HOUR, minute=0),
+        time=time(hour=REMINDER_HOUR, minute=0, tzinfo=_ITALY_TZ),
         name="daily_reminder",
     )

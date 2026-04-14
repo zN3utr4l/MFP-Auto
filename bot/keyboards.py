@@ -3,64 +3,69 @@ from __future__ import annotations
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 
-def slot_keyboard_high(slot: str, pattern_id: int) -> InlineKeyboardMarkup:
+def slot_keyboard_high(slot: str, pattern_id: int, date_str: str = "") -> InlineKeyboardMarkup:
+    d = f":{date_str}" if date_str else ""
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("\u2705 Confirm", callback_data=f"confirm:{slot}:{pattern_id}"),
-            InlineKeyboardButton("\U0001F504 Change", callback_data=f"change:{slot}:{pattern_id}"),
-            InlineKeyboardButton("\u23ED Skip", callback_data=f"skip:{slot}"),
+            InlineKeyboardButton("\u2705 Confirm", callback_data=f"confirm:{slot}:{pattern_id}{d}"),
+            InlineKeyboardButton("\U0001F504 Change", callback_data=f"change:{slot}:{pattern_id}{d}"),
+            InlineKeyboardButton("\u23ED Skip", callback_data=f"skip:{slot}{d}"),
         ]
     ])
 
 
-def slot_keyboard_low(slot: str, alternatives: list[dict]) -> InlineKeyboardMarkup:
+def slot_keyboard_low(slot: str, alternatives: list[dict], date_str: str = "") -> InlineKeyboardMarkup:
+    d = f":{date_str}" if date_str else ""
     rows = []
     for alt in alternatives:
         label = ", ".join(alt["foods"])
         if len(label) > 40:
             label = label[:37] + "..."
-        rows.append([InlineKeyboardButton(label, callback_data=f"pick:{slot}:{alt['pattern_id']}")])
+        rows.append([InlineKeyboardButton(label, callback_data=f"pick:{slot}:{alt['pattern_id']}{d}")])
 
     rows.append([
-        InlineKeyboardButton("\U0001F50D Search", callback_data=f"search:{slot}"),
-        InlineKeyboardButton("\u23ED Skip", callback_data=f"skip:{slot}"),
+        InlineKeyboardButton("\U0001F50D Search", callback_data=f"search:{slot}{d}"),
+        InlineKeyboardButton("\u23ED Skip", callback_data=f"skip:{slot}{d}"),
     ])
     return InlineKeyboardMarkup(rows)
 
 
-def slot_keyboard_none(slot: str) -> InlineKeyboardMarkup:
+def slot_keyboard_none(slot: str, date_str: str = "") -> InlineKeyboardMarkup:
+    d = f":{date_str}" if date_str else ""
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("\U0001F50D Search", callback_data=f"search:{slot}"),
-            InlineKeyboardButton("\u23ED Skip", callback_data=f"skip:{slot}"),
+            InlineKeyboardButton("\U0001F50D Search", callback_data=f"search:{slot}{d}"),
+            InlineKeyboardButton("\u23ED Skip", callback_data=f"skip:{slot}{d}"),
         ]
     ])
 
 
-def alternatives_keyboard(slot: str, alternatives: list[dict]) -> InlineKeyboardMarkup:
+def alternatives_keyboard(slot: str, alternatives: list[dict], date_str: str = "") -> InlineKeyboardMarkup:
     """Show top 5 alternatives after user presses Change."""
+    d = f":{date_str}" if date_str else ""
     rows = []
     for alt in alternatives:
         label = ", ".join(alt["foods"])
         if len(label) > 40:
             label = label[:37] + "..."
-        rows.append([InlineKeyboardButton(label, callback_data=f"pick:{slot}:{alt['pattern_id']}")])
+        rows.append([InlineKeyboardButton(label, callback_data=f"pick:{slot}:{alt['pattern_id']}{d}")])
 
     rows.append([
-        InlineKeyboardButton("\U0001F50D Search", callback_data=f"search:{slot}"),
-        InlineKeyboardButton("\u2B05 Back", callback_data=f"back:{slot}"),
+        InlineKeyboardButton("\U0001F50D Search", callback_data=f"search:{slot}{d}"),
+        InlineKeyboardButton("\u2B05 Back", callback_data=f"back:{slot}{d}"),
     ])
     return InlineKeyboardMarkup(rows)
 
 
-def search_results_keyboard(slot: str, results: list[dict]) -> InlineKeyboardMarkup:
+def search_results_keyboard(slot: str, results: list[dict], date_str: str = "") -> InlineKeyboardMarkup:
+    d = f":{date_str}" if date_str else ""
     rows = []
     for r in results[:5]:
         label = r["name"]
         if len(label) > 40:
             label = label[:37] + "..."
-        rows.append([InlineKeyboardButton(label, callback_data=f"search_pick:{slot}:{r['mfp_id']}")])
-    rows.append([InlineKeyboardButton("\u2B05 Back", callback_data=f"back:{slot}")])
+        rows.append([InlineKeyboardButton(label, callback_data=f"search_pick:{slot}:{r['mfp_id']}{d}")])
+    rows.append([InlineKeyboardButton("\u2B05 Back", callback_data=f"back:{slot}{d}")])
     return InlineKeyboardMarkup(rows)
 
 
