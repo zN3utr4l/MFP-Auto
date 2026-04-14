@@ -21,81 +21,88 @@ def test_from_auth_json():
     assert client._user_id == "uid456"
 
 
-def test_get_day_parses_api_response(client):
-    api_response = {
+def test_get_day_uses_read_diary(client):
+    """get_day_sync uses v2/diary/read_diary to get individual food entries."""
+    read_diary_response = {
         "items": [
             {
-                "type": "diary_meal",
-                "date": "2026-04-09",
-                "diary_meal": "Breakfast",
-                "nutritional_contents": {
-                    "energy": {"unit": "calories", "value": 300.0},
-                    "protein": 10.0,
-                },
+                "type": "food_entry",
+                "meal_name": "Breakfast",
+                "food": {"id": 111, "description": "Oatmeal"},
+                "servings": 1.0,
+                "serving_size": {"value": 100, "unit": "g", "nutrition_multiplier": 1.0},
+                "nutritional_contents": {"energy": {"value": 300}, "protein": 10},
             },
             {
-                "type": "diary_meal",
-                "date": "2026-04-09",
-                "diary_meal": "Lunch",
-                "nutritional_contents": {
-                    "energy": {"unit": "calories", "value": 500.0},
-                    "protein": 30.0,
-                },
+                "type": "food_entry",
+                "meal_name": "Breakfast",
+                "food": {"id": 222, "description": "Banana"},
+                "servings": 1.0,
+                "serving_size": {"value": 1, "unit": "medium", "nutrition_multiplier": 1.18},
+                "nutritional_contents": {"energy": {"value": 105}, "protein": 1.3},
+            },
+            {
+                "type": "food_entry",
+                "meal_name": "Lunch",
+                "food": {"id": 333, "description": "Chicken breast"},
+                "servings": 1.5,
+                "serving_size": {"value": 100, "unit": "g"},
+                "nutritional_contents": {"energy": {"value": 248}, "protein": 46},
             },
         ]
     }
 
     mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = api_response
+    mock_resp.json.return_value = read_diary_response
     mock_resp.raise_for_status = MagicMock()
     client.session.get = MagicMock(return_value=mock_resp)
 
     result = client.get_day_sync(date(2026, 4, 9))
 
-    assert len(result) == 2
+    assert len(result) == 2  # Breakfast and Lunch
+    assert result[0]["meal_name"] == "Breakfast"
+    assert len(result[0]["entries"]) == 2
+    assert result[0]["entries"][0]["name"] == "Oatmeal"
+    assert result[0]["entries"][0]["mfp_id"] == 111
+    assert result[0]["entries"][1]["name"] == "Banana"
+    assert result[1]["meal_name"] == "Lunch"
+    assert result[1]["entries"][0]["name"] == "Chicken breast"
+
+
+def test_get_day_falls_back_to_summary(client):
+    """When read_diary fails, falls back to v2/diary meal summaries."""
+    # First call (read_diary) raises, second call (v2/diary) returns summaries
+    summary_response = {
+        "items": [
+            {
+                "type": "diary_meal",
+                "diary_meal": "Breakfast",
+                "nutritional_contents": {"energy": {"value": 300}},
+            },
+        ]
+    }
+
+    call_count = 0
+
+    def mock_get(url, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        resp = MagicMock()
+        if "read_diary" in url:
+            resp.raise_for_status.side_effect = Exception("404")
+            return resp
+        resp.json.return_value = summary_response
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    client.session.get = mock_get
+
+    result = client.get_day_sync(date(2026, 4, 9))
+
+    assert call_count == 2  # tried read_diary, then fallback
+    assert len(result) == 1
     assert result[0]["meal_name"] == "Breakfast"
     assert result[0]["entries"][0]["name"] == "Breakfast (300 cal)"
-    assert result[1]["meal_name"] == "Lunch"
-
-
-def test_get_day_parses_individual_entries(client):
-    """When API returns diary_entries nested inside meals, parse individual foods."""
-    api_response = {
-        "items": [
-            {
-                "type": "diary_meal",
-                "diary_meal": "Breakfast",
-                "nutritional_contents": {"energy": {"value": 500}},
-                "diary_entries": [
-                    {
-                        "food": {"id": 111, "description": "Oatmeal"},
-                        "serving_quantity": "80g",
-                        "nutritional_contents": {"energy": {"value": 300}},
-                    },
-                    {
-                        "food": {"id": 222, "description": "Banana"},
-                        "serving_quantity": "1 medium",
-                        "nutritional_contents": {"energy": {"value": 200}},
-                    },
-                ],
-            },
-        ]
-    }
-
-    mock_resp = MagicMock()
-    mock_resp.json.return_value = api_response
-    mock_resp.raise_for_status = MagicMock()
-    client.session.get = MagicMock(return_value=mock_resp)
-
-    result = client.get_day_sync(date(2026, 4, 9))
-
-    assert len(result) == 1
-    entries = result[0]["entries"]
-    assert len(entries) == 2
-    assert entries[0]["name"] == "Oatmeal"
-    assert entries[0]["mfp_id"] == 111
-    assert entries[1]["name"] == "Banana"
 
 
 def test_search_food_returns_serving_sizes_and_nutrition(client):

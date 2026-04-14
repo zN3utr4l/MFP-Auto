@@ -98,12 +98,13 @@ def test_mfp_get_day_returns_individual_entries():
                 # If entry parsing works, names should NOT be "Meal (X cal)" format
                 # (unless fallback was triggered)
                 if " cal)" in name and name.startswith(m["meal_name"]):
-                    pytest.skip(
-                        f"API returned meal summaries, not individual entries "
-                        f"(fallback active): {name}"
+                    pytest.fail(
+                        f"Got meal summary instead of individual entry: {name}. "
+                        "read_diary endpoint may not be working."
                     )
-                print(f"  {d} {m['meal_name']}: {name} OK")
-                return  # found at least one real entry
+                assert entry.get("mfp_id") is not None, f"Entry missing mfp_id: {name}"
+                print(f"  {d} {m['meal_name']}: {name} (id={entry['mfp_id']}) OK")
+                return
 
     pytest.skip("No diary entries in the last 7 days")
 

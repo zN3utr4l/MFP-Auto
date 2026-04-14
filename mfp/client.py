@@ -129,99 +129,103 @@ class MfpClient:
         """Get meals for a date. Returns list of {meal_name, entries}.
 
         Each entry: {name, quantity, mfp_id, nutritional_info}.
-        Requests individual diary entries from the API; falls back to
-        meal-level summaries when entries aren't available.
+        Tries v2/diary/read_diary (individual food entries) first,
+        falls back to v2/diary (meal-level summaries) on failure.
         """
         date_str = target_date.strftime("%Y-%m-%d")
-        data = self._api_get("v2/diary", [
+
+        # Try the undocumented read_diary endpoint for individual food entries
+        try:
+            return self._get_day_via_read_diary(date_str)
+        except Exception:
+            logger.debug("read_diary failed for %s, falling back to v2/diary", date_str, exc_info=True)
+
+        # Fallback: v2/diary (meal-level summaries only)
+        return self._get_day_via_diary_summary(date_str)
+
+    def _get_day_via_read_diary(self, date_str: str) -> list[dict]:
+        """Fetch individual food entries via v2/diary/read_diary."""
+        data = self._api_get("v2/diary/read_diary", [
             ("entry_date", date_str),
-            ("fields[]", "nutritional_contents"),
-            ("fields[]", "diary_entries"),
+            ("types", "food_entry"),
         ])
 
-        logger.debug("MFP diary raw response keys: %s", list(data.keys()))
+        items = data.get("items", [])
+        if not items:
+            raise ValueError("No items from read_diary")
 
-        # First pass: collect diary_entry items keyed by parent meal
+        # Group food_entry items by meal
         meal_entries: dict[str, list[dict]] = {}
         meal_order: list[str] = []
 
-        for item in data.get("items", []):
-            item_type = item.get("type", "")
+        for item in items:
+            if item.get("type") != "food_entry":
+                continue
 
-            if item_type == "diary_meal":
-                meal_name = item.get("diary_meal", "Unknown")
-                if meal_name not in meal_entries:
-                    meal_entries[meal_name] = []
-                    meal_order.append(meal_name)
+            meal_name = item.get("meal_name") or item.get("diary_meal", "Unknown")
+            if meal_name not in meal_entries:
+                meal_entries[meal_name] = []
+                meal_order.append(meal_name)
 
-                # Check for nested diary_entries inside the meal item
-                for de in item.get("diary_entries", []):
-                    entry = self._parse_diary_entry(de)
-                    if entry:
-                        meal_entries[meal_name].append(entry)
+            food = item.get("food", {})
+            name = food.get("description") or food.get("name") or food.get("brand_name", "")
+            mfp_id = food.get("id")
 
-            elif item_type == "diary_entry":
-                # Top-level diary_entry — associate with its meal
-                meal_name = item.get("diary_meal", "Unknown")
-                if meal_name not in meal_entries:
-                    meal_entries[meal_name] = []
-                    meal_order.append(meal_name)
-                entry = self._parse_diary_entry(item)
-                if entry:
-                    meal_entries[meal_name].append(entry)
+            if not name:
+                continue
 
-        # Fallback: if no individual entries were found, use meal-level summaries
+            nc = item.get("nutritional_contents", {})
+            ss = item.get("serving_size", {})
+            servings = item.get("servings", 1.0)
+            quantity = f"{servings} {ss.get('unit', 'serving')}" if ss.get("unit") else str(servings)
+
+            meal_entries[meal_name].append({
+                "name": name,
+                "quantity": quantity,
+                "mfp_id": mfp_id,
+                "nutritional_info": nc,
+                "serving_size": ss,
+                "servings": servings,
+            })
+
         if not any(meal_entries.values()):
-            logger.info("No individual diary entries found, falling back to meal summaries")
-            for item in data.get("items", []):
-                if item.get("type") != "diary_meal":
-                    continue
-                meal_name = item.get("diary_meal", "Unknown")
-                nutrition = item.get("nutritional_contents", {})
-                energy = nutrition.get("energy", {})
-                calories = energy.get("value", 0) if isinstance(energy, dict) else 0
-                if calories > 0:
-                    if meal_name not in meal_entries:
-                        meal_entries[meal_name] = []
-                        meal_order.append(meal_name)
-                    meal_entries[meal_name].append({
-                        "name": f"{meal_name} ({int(calories)} cal)",
-                        "quantity": 1.0,
-                        "mfp_id": None,
-                        "nutritional_info": nutrition,
-                    })
+            raise ValueError("read_diary returned items but no parseable food entries")
+
+        logger.info("read_diary: %d entries across %d meals for %s",
+                     sum(len(v) for v in meal_entries.values()), len(meal_order), date_str)
 
         return [
             {"meal_name": mn, "entries": meal_entries[mn]}
             for mn in meal_order
         ]
 
-    @staticmethod
-    def _parse_diary_entry(de: dict) -> dict | None:
-        """Extract a usable food entry from a diary_entry dict."""
-        # Try nested food object first
-        food = de.get("food", {})
-        name = food.get("description") or food.get("name") or food.get("brand_name", "")
-        mfp_id = food.get("id")
+    def _get_day_via_diary_summary(self, date_str: str) -> list[dict]:
+        """Fallback: fetch meal-level calorie summaries via v2/diary."""
+        data = self._api_get("v2/diary", [
+            ("entry_date", date_str),
+            ("fields[]", "nutritional_contents"),
+        ])
 
-        # Fall back to top-level fields
-        if not name:
-            name = de.get("description") or de.get("name") or de.get("food_name", "")
-        if not mfp_id:
-            mfp_id = de.get("food_id") or de.get("id")
+        meals = []
+        for item in data.get("items", []):
+            if item.get("type") != "diary_meal":
+                continue
+            meal_name = item.get("diary_meal", "Unknown")
+            nutrition = item.get("nutritional_contents", {})
+            energy = nutrition.get("energy", {})
+            calories = energy.get("value", 0) if isinstance(energy, dict) else 0
 
-        if not name:
-            return None
+            entries = []
+            if calories > 0:
+                entries.append({
+                    "name": f"{meal_name} ({int(calories)} cal)",
+                    "quantity": 1.0,
+                    "mfp_id": None,
+                    "nutritional_info": nutrition,
+                })
+            meals.append({"meal_name": meal_name, "entries": entries})
 
-        nutrition = de.get("nutritional_contents", {})
-        quantity = de.get("serving_quantity") or de.get("quantity") or 1.0
-
-        return {
-            "name": name,
-            "quantity": quantity,
-            "mfp_id": mfp_id,
-            "nutritional_info": nutrition,
-        }
+        return meals
 
     # --- Search (uses API) ---
 
