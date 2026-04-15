@@ -216,7 +216,7 @@ async def _save_food_with_serving(
         serving_info = {
             "serving_size_index": ss_index,
             "servings": amount,
-            "serving_unit": ss.get("unit", "serving"),
+            "unit": ss.get("unit", "serving"),
             "nutrition_multiplier": ss.get("nutrition_multiplier", 1.0),
         }
 

@@ -442,7 +442,8 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                     sync_failed = True
 
         day_type = "weekend" if parsed_date.weekday() >= 5 else "weekday"
-        await on_replace(db, user_id, slot, day_type, picked["foods"], picked["mfp_ids"], target_date)
+        await on_replace(db, user_id, slot, day_type, picked["foods"], picked["mfp_ids"], target_date,
+                         serving_infos=serving_infos)
 
         day_data["confirmed"] = day_data.get("confirmed", 0) + 1
         if sync_failed:
@@ -472,7 +473,12 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             day_type = "weekend" if date.fromisoformat(target_date).weekday() >= 5 else "weekday"
             patterns = await get_meal_patterns(db, user_id, slot, day_type)
             alts = [
-                {"foods": p.get_food_combo_list(), "mfp_ids": p.get_mfp_food_ids_list(), "pattern_id": p.id}
+                {
+                    "foods": p.get_food_combo_list(),
+                    "mfp_ids": p.get_mfp_food_ids_list(),
+                    "pattern_id": p.id,
+                    "serving_info": json.loads(p.serving_info),
+                }
                 for p in patterns[:5]
             ]
         kb = alternatives_keyboard(slot, alts, target_date, current_flow_id or "")
@@ -509,6 +515,18 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await query.edit_message_text("Could not find food details. Try searching again.")
             return
 
+        # Extract serving_info from cached search result (has serving_sizes)
+        si = {}
+        serving_sizes = details.get("serving_sizes", [])
+        if serving_sizes:
+            ss = serving_sizes[0]
+            si = {
+                "serving_size_index": ss.get("index"),
+                "servings": 1.0,
+                "unit": ss.get("unit", "serving"),
+                "nutrition_multiplier": ss.get("nutrition_multiplier", 1.0),
+            }
+
         client = context.user_data.get("mfp_client")
         parsed_date = date.fromisoformat(target_date)
         entry = MealEntry(
@@ -519,7 +537,7 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             food_name=details["name"],
             quantity="",
             mfp_food_id=str(mfp_id),
-            serving_info=json.dumps({}),
+            serving_info=json.dumps(si),
             source="bot_search",
             synced_to_mfp=False,
         )
@@ -527,13 +545,15 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         sync_failed = False
         if client:
             try:
-                await client.add_entry(target_date, slot, details["name"], str(mfp_id))
+                await client.add_entry(target_date, slot, details["name"], str(mfp_id),
+                                       fallback_serving=si)
                 await mark_entry_synced(db, entry_id)
             except Exception:
                 sync_failed = True
 
         day_type = "weekend" if parsed_date.weekday() >= 5 else "weekday"
-        await on_replace(db, user_id, slot, day_type, [details["name"]], [str(mfp_id)], target_date)
+        await on_replace(db, user_id, slot, day_type, [details["name"]], [str(mfp_id)], target_date,
+                         serving_infos=[si])
 
         day_data["confirmed"] = day_data.get("confirmed", 0) + 1
         if sync_failed:

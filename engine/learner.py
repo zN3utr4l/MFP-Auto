@@ -26,6 +26,7 @@ async def on_replace(
     new_foods: list[str],
     new_mfp_ids: list[str],
     confirmed_date: str,
+    serving_infos: list[dict] | None = None,
 ) -> int:
     """User replaced a prediction with a different meal. Boost or create the replacement pattern.
     Returns the pattern_id of the boosted/created pattern."""
@@ -48,5 +49,6 @@ async def on_replace(
         mfp_food_ids=json.dumps(new_mfp_ids),
         weight=1.0,
         last_confirmed=confirmed_date,
+        serving_info=json.dumps(serving_infos or []),
     )
     return await save_meal_pattern(db, pattern)

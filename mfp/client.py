@@ -221,6 +221,7 @@ class MfpClient:
                     "quantity": 1.0,
                     "mfp_id": None,
                     "nutritional_info": nutrition,
+                    "summary_only": True,
                 })
             meals.append({"meal_name": meal_name, "entries": entries})
 
