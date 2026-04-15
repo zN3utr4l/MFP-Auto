@@ -390,32 +390,37 @@ class MfpClient:
         if not mfp_food_id or mfp_food_id in ("None", ""):
             raise ValueError(f"No food ID for '{food_name}' — cannot sync to MFP")
 
-        # Fetch version and valid serving_size from MFP
+        # Look up version (always needed)
         info = self._lookup_food_sync(food_name, mfp_food_id, fallback_serving=fallback_serving)
         version = info["version"]
-        serving_sizes = info["serving_sizes"]
 
-        if serving_sizes:
+        # Determine serving_size: prefer stored info (exact match from diary),
+        # fall back to API lookup, then default as last resort.
+        fb_unit = None
+        if fallback_serving:
+            fb_unit = fallback_serving.get("unit") or fallback_serving.get("serving_unit")
+
+        if fb_unit:
+            # Stored serving_info is the most accurate — it came from the
+            # actual diary entry or user selection.
+            serving_size = {
+                "value": fallback_serving.get("value", 1.0),
+                "unit": fb_unit,
+                "nutrition_multiplier": fallback_serving.get("nutrition_multiplier", 1.0),
+            }
+        elif info["serving_sizes"]:
             ss = None
             if serving_size_index is not None:
-                ss = next((s for s in serving_sizes if s.get("index") == serving_size_index), None)
+                ss = next((s for s in info["serving_sizes"] if s.get("index") == serving_size_index), None)
             if ss is None:
-                ss = serving_sizes[0]
+                ss = info["serving_sizes"][0]
             serving_size = {
                 "value": ss.get("value", 1.0),
                 "unit": ss.get("unit", "serving"),
                 "nutrition_multiplier": ss.get("nutrition_multiplier", 1.0),
             }
-        elif fallback_serving and (fallback_serving.get("unit") or fallback_serving.get("serving_unit")):
-            logger.info("Using stored serving_info fallback for '%s'", food_name)
-            serving_size = {
-                "value": fallback_serving.get("value", 1.0),
-                "unit": fallback_serving.get("unit") or fallback_serving["serving_unit"],
-                "nutrition_multiplier": fallback_serving.get("nutrition_multiplier", 1.0),
-            }
         else:
-            # Last resort: use default "1 serving" — MFP resolves nutrition from the food ID
-            logger.warning("Using default serving for '%s' (id=%s) — lookup and fallback both empty",
+            logger.warning("Using default serving for '%s' (id=%s) — no serving info available",
                            food_name, mfp_food_id)
             serving_size = {"value": 1.0, "unit": "serving", "nutrition_multiplier": 1.0}
 

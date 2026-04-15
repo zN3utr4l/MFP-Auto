@@ -78,8 +78,11 @@ async def undo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     db = context.bot_data["db"]
     user_id = update.effective_user.id
     await db.execute(
-        "DELETE FROM meals_history WHERE telegram_user_id = ? AND date = ? AND food_name = ? "
-        "ORDER BY id DESC LIMIT 1",
+        "DELETE FROM meals_history WHERE id = ("
+        "  SELECT id FROM meals_history"
+        "  WHERE telegram_user_id = ? AND date = ? AND food_name = ?"
+        "  ORDER BY id DESC LIMIT 1"
+        ")",
         (user_id, today.isoformat(), latest["food_name"]),
     )
     await db.commit()
