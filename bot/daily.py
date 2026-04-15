@@ -157,27 +157,22 @@ async def _send_slot(
 
 async def _send_next_slot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Send the next pending slot. Returns True if there was a slot to send, False if day is complete."""
-    db = context.bot_data["db"]
-    user_id = update.effective_user.id
     day_data = context.user_data.get("current_day", {})
     target_date = date.fromisoformat(day_data["date"])
     predictions = day_data.get("all_predictions", {})
 
     current_idx = day_data.get("current_slot_idx", -1) + 1
 
-    # Find next slot that hasn't been filled (check local DB + MFP diary)
+    # Find next slot that hasn't been filled — only check MFP (source of truth)
     mfp_filled = day_data.get("mfp_filled", set())
     while current_idx < len(MEAL_SLOTS):
         slot = MEAL_SLOTS[current_idx]
         if slot in mfp_filled:
             current_idx += 1
             continue
-        existing = await get_meal_entries(db, user_id, target_date.isoformat(), slot)
-        if not existing:
-            context.user_data["current_day"]["current_slot_idx"] = current_idx
-            await _send_slot(update, context, target_date, slot, predictions[slot])
-            return True
-        current_idx += 1
+        context.user_data["current_day"]["current_slot_idx"] = current_idx
+        await _send_slot(update, context, target_date, slot, predictions[slot])
+        return True
 
     return False
 

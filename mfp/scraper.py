@@ -21,10 +21,11 @@ async def scrape_history(
     on_progress: callable | None = None,
 ) -> int:
     """Scrape MFP diary from start_date to end_date inclusive. Returns total entries saved."""
-    # Clear previous scrape data to avoid duplicates on re-import
+    # Clear previous scrape data in this date range to avoid duplicates on re-import
     await db.execute(
-        "DELETE FROM meals_history WHERE telegram_user_id = ? AND source = 'mfp_scrape'",
-        (telegram_user_id,),
+        "DELETE FROM meals_history WHERE telegram_user_id = ? AND source = 'mfp_scrape' "
+        "AND date >= ? AND date <= ?",
+        (telegram_user_id, start_date.isoformat(), end_date.isoformat()),
     )
     await db.commit()
 

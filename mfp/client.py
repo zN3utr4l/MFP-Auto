@@ -19,6 +19,8 @@ _SLOT_TO_MEAL_POSITION: dict[str, int] = {
     "snacks": 3,
 }
 
+_SLOT_TO_MEAL_POSITION_REVERSE: dict[int, str] = {v: k for k, v in _SLOT_TO_MEAL_POSITION.items()}
+
 
 class MfpClient:
     """MFP client using auth token from browser session. Uses MFP JSON API."""
@@ -62,6 +64,14 @@ class MfpClient:
             logger.error("POST %s → %s: %s", path, resp.status_code, resp.text[:500])
         resp.raise_for_status()
         return resp.json()
+
+    def _api_delete(self, path: str) -> None:
+        """Make an authenticated DELETE to the MFP API."""
+        url = f"{self.API_URL}{path}"
+        resp = self.session.delete(url, headers=self._api_headers())
+        if not resp.ok:
+            logger.error("DELETE %s → %s: %s", path, resp.status_code, resp.text[:500])
+        resp.raise_for_status()
 
     # --- User info ---
 
@@ -431,6 +441,51 @@ class MfpClient:
         logger.info("Added '%s' to MFP diary (%s, %s)", food_name, date_str, meal_name)
         return True
 
+    # --- Delete diary entry ---
+
+    def delete_entry_sync(self, entry_uuid: str) -> bool:
+        """Delete a diary entry by UUID. Returns True on success."""
+        self._api_delete(f"v2/diary/{entry_uuid}")
+        logger.info("Deleted diary entry %s", entry_uuid)
+        return True
+
+    # --- Recent entries for undo ---
+
+    def get_recent_entries_sync(self, target_date: date) -> list[dict]:
+        """Get diary entries for a date, sorted by created_at DESC (most recent first).
+
+        Returns list of {uuid, food_name, slot, created_at, mfp_food_id}.
+        """
+        date_str = target_date.strftime("%Y-%m-%d")
+        data = self._api_get("v2/diary/read_diary", [
+            ("entry_date", date_str),
+            ("types", "food_entry"),
+        ])
+
+        entries = []
+        for item in data.get("items", []):
+            if item.get("type") != "food_entry":
+                continue
+            food = item.get("food", {})
+            name = food.get("description") or food.get("name") or food.get("brand_name", "")
+            if not name:
+                continue
+
+            meal_name = item.get("meal_name") or item.get("diary_meal", "Unknown")
+            slot = _SLOT_TO_MEAL_POSITION_REVERSE.get(item.get("meal_position"), meal_name)
+
+            entries.append({
+                "uuid": item["id"],
+                "food_name": name,
+                "slot": slot,
+                "meal_name": meal_name,
+                "created_at": item.get("created_at", ""),
+                "mfp_food_id": str(food.get("id", "")),
+            })
+
+        entries.sort(key=lambda e: e["created_at"], reverse=True)
+        return entries
+
     # --- Async wrappers ---
 
     async def validate(self) -> str:
@@ -450,3 +505,9 @@ class MfpClient:
                         fallback_serving: dict | None = None) -> bool:
         return await asyncio.to_thread(self.add_entry_sync, date_str, meal_name, food_name, mfp_food_id,
                                        servings, serving_size_index, fallback_serving)
+
+    async def delete_entry(self, entry_uuid: str) -> bool:
+        return await asyncio.to_thread(self.delete_entry_sync, entry_uuid)
+
+    async def get_recent_entries(self, target_date: date) -> list[dict]:
+        return await asyncio.to_thread(self.get_recent_entries_sync, target_date)

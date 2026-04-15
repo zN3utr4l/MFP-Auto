@@ -18,76 +18,76 @@ from mfp.sync import retry_unsynced
 
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    from bot.daily import _ensure_client
+    from bot.daily import _ensure_client, _fetch_mfp_filled_slots
 
     db = context.bot_data["db"]
     user_id = update.effective_user.id
     today = date.today()
     client = await _ensure_client(update, context)
 
+    if not client:
+        return
+
     lines = ["\U0001F4CB *Weekly Status*\n"]
 
     for i in range(7):
         d = today + timedelta(days=i)
         logged = 0
-
-        # Check MFP diary for this day
-        if client:
-            try:
-                totals = await client.get_day_totals(d)
-                if totals.get("calories", 0) > 0:
-                    # Count filled slots from MFP diary
-                    from bot.daily import _fetch_mfp_filled_slots
-                    filled = await _fetch_mfp_filled_slots(client, d)
-                    logged = len(filled)
-            except Exception:
-                pass
-
-        # Also count local DB entries
-        if logged == 0:
-            for slot in MEAL_SLOTS:
-                entries = await get_meal_entries(db, user_id, d.isoformat(), slot)
-                if entries:
-                    logged += 1
+        try:
+            filled = await _fetch_mfp_filled_slots(client, d)
+            logged = len(filled)
+        except Exception:
+            pass
 
         pending = len(MEAL_SLOTS) - logged
         lines.append(format_status_line(d.isoformat(), logged, pending))
 
     unsynced = await get_unsynced_entries(db, user_id)
     if unsynced:
-        lines.append(f"\n\u26A0 _{len(unsynced)} entries not synced._ Use /retry")
+        lines.append(f"\n\u26A0 _{len(unsynced)} entries not synced._ Use /pending")
 
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
 async def undo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    db = context.bot_data["db"]
-    user_id = update.effective_user.id
+    from bot.daily import _ensure_client
 
-    # Find the last entry inserted by this user
-    async with db.execute(
-        "SELECT * FROM meals_history WHERE telegram_user_id = ? ORDER BY id DESC LIMIT 1",
-        (user_id,),
-    ) as cursor:
-        row = await cursor.fetchone()
-
-    if not row:
-        await update.message.reply_text("\u2049 Nothing to undo.")
+    client = await _ensure_client(update, context)
+    if not client:
         return
 
-    food_name = row["food_name"]
-    entry_date = row["date"]
-    slot = row["slot"]
-    entry_id = row["id"]
-    emoji = MEAL_SLOT_EMOJIS.get(slot, "")
+    today = date.today()
+    try:
+        entries = await client.get_recent_entries(today)
+    except Exception:
+        await update.message.reply_text("\u26A0 Could not reach MFP. Try again later.")
+        return
 
-    await db.execute("DELETE FROM meals_history WHERE id = ?", (entry_id,))
+    if not entries:
+        await update.message.reply_text("\u2049 Nothing to undo for today.")
+        return
+
+    latest = entries[0]
+    try:
+        await client.delete_entry(latest["uuid"])
+    except Exception:
+        await update.message.reply_text("\u26A0 Failed to delete from MFP. Try again later.")
+        return
+
+    # Also remove from local DB if present
+    db = context.bot_data["db"]
+    user_id = update.effective_user.id
+    await db.execute(
+        "DELETE FROM meals_history WHERE telegram_user_id = ? AND date = ? AND food_name = ? "
+        "ORDER BY id DESC LIMIT 1",
+        (user_id, today.isoformat(), latest["food_name"]),
+    )
     await db.commit()
 
+    emoji = MEAL_SLOT_EMOJIS.get(latest["slot"], "")
     await update.message.reply_text(
-        f"\u21A9 *Removed:* {food_name}\n"
-        f"{emoji} {slot} on {entry_date}\n\n"
-        "_If already synced to MFP, remove it manually in the app._",
+        f"\u21A9 *Removed from MFP:* {latest['food_name']}\n"
+        f"{emoji} {latest['meal_name']}",
         parse_mode="Markdown",
     )
 
@@ -345,6 +345,56 @@ async def patterns_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if len(text) > 4000:
         text = text[:3950] + "\n\n_...truncated_"
     await update.message.reply_text(text, parse_mode="Markdown")
+
+
+async def pending_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    db = context.bot_data["db"]
+    user_id = update.effective_user.id
+
+    entries = await get_unsynced_entries(db, user_id)
+    if not entries:
+        await update.message.reply_text("\u2705 All synced! Nothing pending.")
+        return
+
+    lines = [f"\u23F3 *{len(entries)} pending entries:*\n"]
+    for e in entries[:15]:
+        emoji = MEAL_SLOT_EMOJIS.get(e.slot, "")
+        lines.append(f"  {emoji} {e.date} {e.slot}: {e.food_name}")
+
+    if len(entries) > 15:
+        lines.append(f"\n  _...+{len(entries) - 15} more_")
+
+    lines.append("\nUse /retry to sync, or /reset to clear all local data.")
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
+async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    db = context.bot_data["db"]
+    user_id = update.effective_user.id
+
+    args = context.args or []
+    if not args or args[0].lower() != "confirm":
+        await update.message.reply_text(
+            "\u26A0 *Factory Reset*\n\n"
+            "This will delete all your local data:\n"
+            "  \u2022 Meal history\n"
+            "  \u2022 Patterns\n"
+            "  \u2022 Week progress\n\n"
+            "Your MFP diary is NOT affected.\n\n"
+            "Type `/reset confirm` to proceed.",
+            parse_mode="Markdown",
+        )
+        return
+
+    await db.execute("DELETE FROM meals_history WHERE telegram_user_id = ?", (user_id,))
+    await db.execute("DELETE FROM meal_patterns WHERE telegram_user_id = ?", (user_id,))
+    await db.execute("DELETE FROM week_progress WHERE telegram_user_id = ?", (user_id,))
+    await db.commit()
+
+    await update.message.reply_text(
+        "\u2705 Reset complete. All local data cleared.\n\n"
+        "Use /import to re-import your MFP history."
+    )
 
 
 async def analyze_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
