@@ -107,10 +107,14 @@ async def retry_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         context.user_data["mfp_client"] = client
 
     msg = await update.message.reply_text("\U0001F504 Retrying unsynced entries...")
-    synced, failed = await retry_unsynced(db, client, user_id)
+    synced, failed, errors = await retry_unsynced(db, client, user_id)
 
     if failed:
-        await msg.edit_text(f"\u26A0 Retry: *{synced}* synced, *{failed}* failed.", parse_mode="Markdown")
+        error_lines = "\n".join(f"  • {e}" for e in errors[:5])
+        await msg.edit_text(
+            f"\u26A0 Retry: *{synced}* synced, *{failed}* failed.\n\n{error_lines}",
+            parse_mode="Markdown",
+        )
     elif synced:
         await msg.edit_text(f"\u2705 All *{synced}* entries synced!", parse_mode="Markdown")
     else:

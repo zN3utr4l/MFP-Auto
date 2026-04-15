@@ -266,22 +266,41 @@ class MfpClient:
     def _lookup_food_sync(self, food_name: str, mfp_food_id: str) -> dict:
         """Fetch version and serving_sizes for a food via the search API.
 
+        Tries multiple search strategies:
+        1. Full food name
+        2. First significant word (for long brand+product names)
+        3. Food ID as query
+
         Returns {version, serving_sizes} or sensible defaults.
         """
-        try:
-            data = self._api_get("v2/nutrition", [
-                ("q", food_name),
-                ("fields[]", "serving_sizes"),
-            ])
-            for wrapper in data.get("items", []):
-                inner = wrapper.get("item", {})
-                if str(inner.get("id")) == str(mfp_food_id):
-                    return {
-                        "version": str(inner.get("version", mfp_food_id)),
-                        "serving_sizes": inner.get("serving_sizes", []),
-                    }
-        except Exception:
-            logger.debug("Food lookup failed for '%s', using defaults", food_name)
+        queries = [food_name]
+        # For long names like "Esselunga - Cozze Cilene", try shorter queries
+        # Strip brand prefix (before " - ") and use core product name
+        if " - " in food_name:
+            parts = food_name.split(" - ")
+            queries.append(parts[-1].strip())  # last part (product name)
+            if len(parts) > 2:
+                queries.append(parts[1].strip())  # middle part
+        elif len(food_name.split()) > 3:
+            queries.append(" ".join(food_name.split()[:3]))
+
+        for query in queries:
+            try:
+                data = self._api_get("v2/nutrition", [
+                    ("q", query),
+                    ("fields[]", "serving_sizes"),
+                ])
+                for wrapper in data.get("items", []):
+                    inner = wrapper.get("item", {})
+                    if str(inner.get("id")) == str(mfp_food_id):
+                        return {
+                            "version": str(inner.get("version", mfp_food_id)),
+                            "serving_sizes": inner.get("serving_sizes", []),
+                        }
+            except Exception:
+                logger.debug("Food lookup with query '%s' failed", query)
+
+        logger.warning("Food '%s' (id=%s) not found in any search query", food_name, mfp_food_id)
         return {"version": str(mfp_food_id), "serving_sizes": []}
 
     def get_food_details_sync(self, mfp_id: int, hint_name: str = "") -> dict | None:

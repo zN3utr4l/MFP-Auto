@@ -33,7 +33,7 @@ async def test_retry_unsynced_marks_successful(db):
     mock_client = MagicMock()
     mock_client.add_entry = AsyncMock(return_value=True)
 
-    synced, failed = await retry_unsynced(db, mock_client, telegram_user_id=1)
+    synced, failed, errors = await retry_unsynced(db, mock_client, telegram_user_id=1)
     assert synced == 1
     assert failed == 0
 
@@ -53,9 +53,11 @@ async def test_retry_unsynced_counts_failures(db):
     mock_client = MagicMock()
     mock_client.add_entry = AsyncMock(side_effect=Exception("MFP down"))
 
-    synced, failed = await retry_unsynced(db, mock_client, telegram_user_id=1)
+    synced, failed, errors = await retry_unsynced(db, mock_client, telegram_user_id=1)
     assert synced == 0
     assert failed == 1
+    assert len(errors) == 1
+    assert "Oats" in errors[0]
 
 
 @pytest.mark.asyncio
@@ -77,7 +79,7 @@ async def test_retry_unsynced_reuses_serving_info(db):
     mock_client = MagicMock()
     mock_client.add_entry = AsyncMock(return_value=True)
 
-    synced, failed = await retry_unsynced(db, mock_client, telegram_user_id=1)
+    synced, failed, errors = await retry_unsynced(db, mock_client, telegram_user_id=1)
     assert synced == 1
     assert failed == 0
 
