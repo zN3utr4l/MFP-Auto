@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import date, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -69,3 +70,40 @@ async def test_scrape_history_maps_known_meals(db):
 
     entries = await get_meal_entries(db, telegram_user_id=1, date="2026-04-10", slot="lunch")
     assert len(entries) == 1
+
+
+@pytest.mark.asyncio
+async def test_scrape_history_persists_food_metadata_for_retry_lookup(db):
+    mock_client = MagicMock()
+
+    async def fake_get_day(d):
+        return [{
+            "meal_name": "Lunch",
+            "entries": [{
+                "name": "Rice 100g",
+                "quantity": 1.0,
+                "mfp_id": 333,
+                "servings": 1.5,
+                "serving_size": {"value": 100.0, "unit": "g", "nutrition_multiplier": 1.0},
+                "food_version": "v333",
+                "food_serving_sizes": [
+                    {"index": 0, "value": 100.0, "unit": "g", "nutrition_multiplier": 1.0},
+                ],
+            }],
+        }]
+
+    mock_client.get_day = fake_get_day
+
+    await scrape_history(
+        db,
+        mock_client,
+        telegram_user_id=1,
+        start_date=date(2026, 4, 10),
+        end_date=date(2026, 4, 10),
+    )
+
+    entries = await get_meal_entries(db, telegram_user_id=1, date="2026-04-10", slot="lunch")
+    assert len(entries) == 1
+    serving_info = json.loads(entries[0].serving_info)
+    assert serving_info["food_version"] == "v333"
+    assert serving_info["food_serving_sizes"][0]["unit"] == "g"

@@ -28,7 +28,14 @@ def test_get_day_uses_read_diary(client):
             {
                 "type": "food_entry",
                 "meal_name": "Breakfast",
-                "food": {"id": 111, "description": "Oatmeal"},
+                "food": {
+                    "id": 111,
+                    "description": "Oatmeal",
+                    "version": "v111",
+                    "serving_sizes": [
+                        {"index": 0, "value": 40, "unit": "g", "nutrition_multiplier": 1.0},
+                    ],
+                },
                 "servings": 1.0,
                 "serving_size": {"value": 100, "unit": "g", "nutrition_multiplier": 1.0},
                 "nutritional_contents": {"energy": {"value": 300}, "protein": 10},
@@ -36,7 +43,7 @@ def test_get_day_uses_read_diary(client):
             {
                 "type": "food_entry",
                 "meal_name": "Breakfast",
-                "food": {"id": 222, "description": "Banana"},
+                "food": {"id": 222, "description": "Banana", "version": "v222", "serving_sizes": []},
                 "servings": 1.0,
                 "serving_size": {"value": 1, "unit": "medium", "nutrition_multiplier": 1.18},
                 "nutritional_contents": {"energy": {"value": 105}, "protein": 1.3},
@@ -44,7 +51,7 @@ def test_get_day_uses_read_diary(client):
             {
                 "type": "food_entry",
                 "meal_name": "Lunch",
-                "food": {"id": 333, "description": "Chicken breast"},
+                "food": {"id": 333, "description": "Chicken breast", "version": "v333", "serving_sizes": []},
                 "servings": 1.5,
                 "serving_size": {"value": 100, "unit": "g"},
                 "nutritional_contents": {"energy": {"value": 248}, "protein": 46},
@@ -64,6 +71,8 @@ def test_get_day_uses_read_diary(client):
     assert len(result[0]["entries"]) == 2
     assert result[0]["entries"][0]["name"] == "Oatmeal"
     assert result[0]["entries"][0]["mfp_id"] == 111
+    assert result[0]["entries"][0]["food_version"] == "v111"
+    assert result[0]["entries"][0]["food_serving_sizes"][0]["unit"] == "g"
     assert result[0]["entries"][1]["name"] == "Banana"
     assert result[1]["meal_name"] == "Lunch"
     assert result[1]["entries"][0]["name"] == "Chicken breast"
@@ -135,6 +144,28 @@ def test_search_food_returns_serving_sizes_and_nutrition(client):
     assert results[0]["version"] == "456"
 
 
+def test_lookup_food_sync_prefers_v2_foods_by_id(client):
+    direct_resp = MagicMock()
+    direct_resp.json.return_value = {
+        "item": {
+            "id": "12345",
+            "version": "v-direct",
+            "serving_sizes": [
+                {"index": 2, "value": 100.0, "unit": "g", "nutrition_multiplier": 1.0},
+            ],
+        }
+    }
+    direct_resp.raise_for_status = MagicMock()
+    client.session.get = MagicMock(return_value=direct_resp)
+
+    result = client._lookup_food_sync("Oatmeal", "12345")
+
+    assert result["version"] == "v-direct"
+    assert result["serving_sizes"][0]["unit"] == "g"
+    called_url = client.session.get.call_args.args[0]
+    assert called_url.endswith("/v2/foods/12345")
+
+
 def test_add_entry_posts_to_diary(client):
     """add_entry_sync sends correct payload to POST /v2/diary."""
     # Mock the lookup (GET) to return serving_sizes
@@ -165,6 +196,65 @@ def test_add_entry_posts_to_diary(client):
     assert item["date"] == "2026-04-13"
     assert item["meal_position"] == 0  # breakfast
     assert item["food"]["id"] == "12345"
+
+
+def test_add_entry_uses_fallback_food_metadata_when_lookup_fails(client):
+    post_resp = MagicMock()
+    post_resp.json.return_value = {"items": [{"id": "abc"}]}
+    post_resp.raise_for_status = MagicMock()
+    post_resp.ok = True
+
+    client.session.get = MagicMock(side_effect=Exception("404"))
+    client.session.post = MagicMock(return_value=post_resp)
+
+    result = client.add_entry_sync(
+        "2026-04-13",
+        "lunch",
+        "Legacy Food",
+        "12345",
+        fallback_serving={
+            "food_version": "legacy-v1",
+            "food_serving_sizes": [
+                {"index": 2, "value": 100.0, "unit": "gr", "nutrition_multiplier": 1.0},
+            ],
+            "serving_size_index": 2,
+        },
+    )
+
+    assert result is True
+    payload = client.session.post.call_args.kwargs["json"]
+    item = payload["items"][0]
+    assert item["food"]["version"] == "legacy-v1"
+    assert item["serving_size"]["unit"] == "gr"
+    assert item["serving_size"]["value"] == 100.0
+
+
+def test_add_entry_accepts_legacy_serving_unit_fallback(client):
+    post_resp = MagicMock()
+    post_resp.json.return_value = {"items": [{"id": "abc"}]}
+    post_resp.raise_for_status = MagicMock()
+    post_resp.ok = True
+
+    client.session.get = MagicMock(side_effect=Exception("404"))
+    client.session.post = MagicMock(return_value=post_resp)
+
+    result = client.add_entry_sync(
+        "2026-04-13",
+        "lunch",
+        "Legacy Food",
+        "12345",
+        fallback_serving={
+            "serving_unit": "g",
+            "value": 100.0,
+            "nutrition_multiplier": 1.0,
+        },
+    )
+
+    assert result is True
+    payload = client.session.post.call_args.kwargs["json"]
+    item = payload["items"][0]
+    assert item["serving_size"]["unit"] == "g"
+    assert item["serving_size"]["value"] == 100.0
 
 
 def test_add_entry_raises_on_empty_food_id(client):

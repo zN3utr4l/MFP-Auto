@@ -53,6 +53,10 @@ async def scrape_history(
                         serving_info["serving_size_index"] = ss["index"]
                 if entry_data.get("servings") is not None:
                     serving_info["servings"] = entry_data["servings"]
+                if entry_data.get("food_version"):
+                    serving_info["food_version"] = entry_data["food_version"]
+                if entry_data.get("food_serving_sizes"):
+                    serving_info["food_serving_sizes"] = entry_data["food_serving_sizes"]
 
                 entry = MealEntry(
                     telegram_user_id=telegram_user_id,

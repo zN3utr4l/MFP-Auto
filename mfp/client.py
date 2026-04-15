@@ -185,6 +185,8 @@ class MfpClient:
                 "nutritional_info": nc,
                 "serving_size": ss,
                 "servings": servings,
+                "food_version": food.get("version"),
+                "food_serving_sizes": food.get("serving_sizes", []),
             })
 
         if not any(meal_entries.values()):
@@ -264,16 +266,49 @@ class MfpClient:
                 })
         return results
 
-    def _lookup_food_sync(self, food_name: str, mfp_food_id: str) -> dict:
-        """Fetch version and serving_sizes for a food via the search API.
+    @staticmethod
+    def _food_lookup_result(inner: dict, fallback_id: str) -> dict:
+        return {
+            "version": str(inner.get("version", fallback_id)),
+            "serving_sizes": inner.get("serving_sizes", []),
+        }
+
+    @staticmethod
+    def _food_lookup_from_fallback(fallback_serving: dict | None, fallback_id: str) -> dict | None:
+        if not fallback_serving:
+            return None
+
+        serving_sizes = fallback_serving.get("food_serving_sizes", [])
+        version = fallback_serving.get("food_version")
+        if version or serving_sizes:
+            return {
+                "version": str(version or fallback_id),
+                "serving_sizes": serving_sizes,
+            }
+        return None
+
+    def _lookup_food_sync(self, food_name: str, mfp_food_id: str, fallback_serving: dict | None = None) -> dict:
+        """Fetch version and serving_sizes for a food.
 
         Tries multiple search strategies:
-        1. Full food name
-        2. First significant word (for long brand+product names)
-        3. Food ID as query
+        1. Direct GET by food ID
+        2. Previously persisted diary metadata
+        3. Search by food name
 
         Returns {version, serving_sizes} or sensible defaults.
         """
+        try:
+            data = self._api_get(f"v2/foods/{mfp_food_id}")
+            inner = data.get("item", {})
+            if str(inner.get("id")) == str(mfp_food_id):
+                return self._food_lookup_result(inner, mfp_food_id)
+        except Exception:
+            logger.debug("Direct food lookup failed for id=%s", mfp_food_id)
+
+        fallback_lookup = self._food_lookup_from_fallback(fallback_serving, mfp_food_id)
+        if fallback_lookup:
+            return fallback_lookup
+
         queries = [food_name]
         # For long names like "Esselunga - Cozze Cilene", try shorter queries
         # Strip brand prefix (before " - ") and use core product name
@@ -294,10 +329,7 @@ class MfpClient:
                 for wrapper in data.get("items", []):
                     inner = wrapper.get("item", {})
                     if str(inner.get("id")) == str(mfp_food_id):
-                        return {
-                            "version": str(inner.get("version", mfp_food_id)),
-                            "serving_sizes": inner.get("serving_sizes", []),
-                        }
+                        return self._food_lookup_result(inner, mfp_food_id)
             except Exception:
                 logger.debug("Food lookup with query '%s' failed", query)
 
@@ -349,7 +381,7 @@ class MfpClient:
             raise ValueError(f"No food ID for '{food_name}' — cannot sync to MFP")
 
         # Fetch version and valid serving_size from MFP
-        info = self._lookup_food_sync(food_name, mfp_food_id)
+        info = self._lookup_food_sync(food_name, mfp_food_id, fallback_serving=fallback_serving)
         version = info["version"]
         serving_sizes = info["serving_sizes"]
 
@@ -364,11 +396,11 @@ class MfpClient:
                 "unit": ss.get("unit", "serving"),
                 "nutrition_multiplier": ss.get("nutrition_multiplier", 1.0),
             }
-        elif fallback_serving and fallback_serving.get("unit"):
+        elif fallback_serving and (fallback_serving.get("unit") or fallback_serving.get("serving_unit")):
             logger.info("Using stored serving_info fallback for '%s'", food_name)
             serving_size = {
                 "value": fallback_serving.get("value", 1.0),
-                "unit": fallback_serving["unit"],
+                "unit": fallback_serving.get("unit") or fallback_serving["serving_unit"],
                 "nutrition_multiplier": fallback_serving.get("nutrition_multiplier", 1.0),
             }
         else:
