@@ -336,8 +336,14 @@ class MfpClient:
         mfp_food_id: str,
         servings: float = 1.0,
         serving_size_index: int | None = None,
+        fallback_serving: dict | None = None,
     ) -> bool:
-        """Add a food entry to the MFP diary. Raises on failure."""
+        """Add a food entry to the MFP diary. Raises on failure.
+
+        fallback_serving: optional dict with unit/nutrition_multiplier from
+        a previously stored serving_info, used when MFP search can't find
+        the food to look up serving_sizes.
+        """
         if not mfp_food_id or mfp_food_id in ("None", ""):
             raise ValueError(f"No food ID for '{food_name}' — cannot sync to MFP")
 
@@ -346,23 +352,29 @@ class MfpClient:
         version = info["version"]
         serving_sizes = info["serving_sizes"]
 
-        if not serving_sizes:
+        if serving_sizes:
+            ss = None
+            if serving_size_index is not None:
+                ss = next((s for s in serving_sizes if s.get("index") == serving_size_index), None)
+            if ss is None:
+                ss = serving_sizes[0]
+            serving_size = {
+                "value": ss.get("value", 1.0),
+                "unit": ss.get("unit", "serving"),
+                "nutrition_multiplier": ss.get("nutrition_multiplier", 1.0),
+            }
+        elif fallback_serving and fallback_serving.get("unit"):
+            logger.info("Using stored serving_info fallback for '%s'", food_name)
+            serving_size = {
+                "value": fallback_serving.get("value", 1.0),
+                "unit": fallback_serving["unit"],
+                "nutrition_multiplier": fallback_serving.get("nutrition_multiplier", 1.0),
+            }
+        else:
             raise ValueError(
                 f"Could not find serving sizes for '{food_name}' (id={mfp_food_id}) — "
                 "cannot build a valid MFP request"
             )
-
-        ss = None
-        if serving_size_index is not None:
-            ss = next((s for s in serving_sizes if s.get("index") == serving_size_index), None)
-        if ss is None:
-            ss = serving_sizes[0]
-
-        serving_size = {
-            "value": ss.get("value", 1.0),
-            "unit": ss.get("unit", "serving"),
-            "nutrition_multiplier": ss.get("nutrition_multiplier", 1.0),
-        }
 
         meal_position = _SLOT_TO_MEAL_POSITION.get(meal_name, 3)
 
@@ -401,6 +413,7 @@ class MfpClient:
         return await asyncio.to_thread(self.get_food_details_sync, mfp_id, hint_name)
 
     async def add_entry(self, date_str: str, meal_name: str, food_name: str, mfp_food_id: str,
-                        servings: float = 1.0, serving_size_index: int | None = None) -> bool:
+                        servings: float = 1.0, serving_size_index: int | None = None,
+                        fallback_serving: dict | None = None) -> bool:
         return await asyncio.to_thread(self.add_entry_sync, date_str, meal_name, food_name, mfp_food_id,
-                                       servings, serving_size_index)
+                                       servings, serving_size_index, fallback_serving)

@@ -38,6 +38,7 @@ async def retry_unsynced(
                 mfp_food_id=entry.mfp_food_id,
                 servings=serving_info.get("servings", 1.0),
                 serving_size_index=serving_info.get("serving_size_index"),
+                fallback_serving=serving_info,
             )
             await mark_entry_synced(db, entry.id)
             synced += 1

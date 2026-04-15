@@ -370,7 +370,8 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 try:
                     await client.add_entry(target_date, slot, food, str(mfp_id),
                                            servings=si.get("servings", 1.0),
-                                           serving_size_index=si.get("serving_size_index"))
+                                           serving_size_index=si.get("serving_size_index"),
+                                           fallback_serving=si)
                     await mark_entry_synced(db, entry_id)
                 except Exception:
                     sync_failed = True  # stays unsynced, user can /retry later
@@ -434,6 +435,7 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                         str(mfp_id),
                         servings=si.get("servings", 1.0),
                         serving_size_index=si.get("serving_size_index"),
+                        fallback_serving=si,
                     )
                     await mark_entry_synced(db, entry_id)
                 except Exception:
