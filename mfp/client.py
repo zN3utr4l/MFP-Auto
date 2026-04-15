@@ -371,10 +371,10 @@ class MfpClient:
                 "nutrition_multiplier": fallback_serving.get("nutrition_multiplier", 1.0),
             }
         else:
-            raise ValueError(
-                f"Could not find serving sizes for '{food_name}' (id={mfp_food_id}) — "
-                "cannot build a valid MFP request"
-            )
+            # Last resort: use default "1 serving" — MFP resolves nutrition from the food ID
+            logger.warning("Using default serving for '%s' (id=%s) — lookup and fallback both empty",
+                           food_name, mfp_food_id)
+            serving_size = {"value": 1.0, "unit": "serving", "nutrition_multiplier": 1.0}
 
         meal_position = _SLOT_TO_MEAL_POSITION.get(meal_name, 3)
 
