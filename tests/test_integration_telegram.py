@@ -150,7 +150,7 @@ async def test_set_bot_commands():
         BotCommand("copy", "Copy meals from another day"),
         BotCommand("history", "7-day macro history"),
         BotCommand("status", "Weekly status"),
-        BotCommand("undo", "Remove last entry"),
+        BotCommand("undo", "Remove latest MFP entry today"),
         BotCommand("retry", "Retry failed syncs"),
     ]
     result = await bot.set_my_commands(commands)

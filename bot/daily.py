@@ -16,7 +16,7 @@ from bot.keyboards import (
     slot_keyboard_none,
 )
 from bot.messages import format_day_header, format_day_summary, format_filled_slot, format_macro_summary, format_slot_message
-from config import MEAL_SLOTS
+from config import MEAL_SLOT_LABELS, MEAL_SLOTS
 from db.database import (
     decrypt_password,
     get_meal_entries,
@@ -273,7 +273,7 @@ async def start_day_flow(
     has_slot = await _send_next_slot(update, context)
     if not has_slot:
         await update.effective_chat.send_message(
-            f"\u2705 All slots already filled for {target_date.isoformat()}!"
+            f"\u2705 All slots are already filled in MFP for {target_date.isoformat()}."
         )
 
 
@@ -324,14 +324,19 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if ((cb_date and cb_date != target_date)
             or (current_flow_id and cb_flow_id != current_flow_id)
             or (cb_flow_id and not current_flow_id)):
-        await query.edit_message_text("This button has expired. Use /today to start a new flow.")
+        await query.edit_message_text(
+            "This button has expired. Start a fresh day flow with /today, /tomorrow, /day, or /week."
+        )
         return
 
     predictions = day_data.get("all_predictions", {})
     if slot not in predictions:
-        await query.edit_message_text("This button has expired. Use /today to start a new flow.")
+        await query.edit_message_text(
+            "This button has expired. Start a fresh day flow with /today, /tomorrow, /day, or /week."
+        )
         return
     prediction = predictions.get(slot, {})
+    slot_label = MEAL_SLOT_LABELS.get(slot, slot.title())
 
     if action == "confirm":
         pattern_id = int(parts[2])
@@ -376,7 +381,7 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         day_data["confirmed"] = day_data.get("confirmed", 0) + 1
         if sync_failed:
             await query.edit_message_text(
-                f"\u26A0 {', '.join(foods)} saved locally, but MFP sync failed. Use /retry."
+                f"\u26A0 {', '.join(foods)} saved locally, but not in MFP yet. Use /retry or /pending."
             )
         else:
             await query.edit_message_text(f"\u2705 {', '.join(foods)} logged!")
@@ -443,7 +448,7 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         day_data["confirmed"] = day_data.get("confirmed", 0) + 1
         if sync_failed:
             await query.edit_message_text(
-                f"\u26A0 {', '.join(picked['foods'])} saved locally, but MFP sync failed. Use /retry."
+                f"\u26A0 {', '.join(picked['foods'])} saved locally, but not in MFP yet. Use /retry or /pending."
             )
         else:
             await query.edit_message_text(f"\u2705 {', '.join(picked['foods'])} logged!")
@@ -477,11 +482,11 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 for p in patterns[:5]
             ]
         kb = alternatives_keyboard(slot, alts, target_date, current_flow_id or "")
-        await query.edit_message_text(f"Alternatives for {slot}:", reply_markup=kb)
+        await query.edit_message_text(f"Alternatives for {slot_label}:", reply_markup=kb)
 
     elif action == "skip":
         day_data["skipped"] = day_data.get("skipped", 0) + 1
-        await query.edit_message_text(f"\u23ED {slot} skipped")
+        await query.edit_message_text(f"\u23ED {slot_label} skipped")
 
         has_next = await _send_next_slot(update, context)
         if not has_next:
@@ -495,7 +500,7 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     elif action == "search":
         context.user_data["search_slot"] = slot
-        await query.edit_message_text(f"Type the food name to search for {slot}:")
+        await query.edit_message_text(f"Type the food name to search for {slot_label}:")
 
     elif action == "search_pick":
         mfp_id = parts[2]
@@ -553,7 +558,7 @@ async def slot_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         day_data["confirmed"] = day_data.get("confirmed", 0) + 1
         if sync_failed:
             await query.edit_message_text(
-                f"\u26A0 {details['name']} saved locally, but MFP sync failed. Use /retry."
+                f"\u26A0 {details['name']} saved locally, but not in MFP yet. Use /retry or /pending."
             )
         else:
             await query.edit_message_text(f"\u2705 {details['name']} logged!")

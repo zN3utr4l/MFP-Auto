@@ -70,7 +70,7 @@ async def post_init(application: Application) -> None:
         BotCommand("patterns", "View learned food patterns"),
         BotCommand("analyze", "Rebuild patterns from history"),
         BotCommand("status", "Slots filled/pending"),
-        BotCommand("undo", "Remove last entry"),
+        BotCommand("undo", "Remove latest MFP entry today"),
         BotCommand("pending", "Show unsynced entries"),
         BotCommand("retry", "Retry failed MFP syncs"),
         BotCommand("reset", "Factory reset local data"),

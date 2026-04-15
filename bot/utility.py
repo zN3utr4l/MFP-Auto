@@ -6,7 +6,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from bot.messages import format_status_line
-from config import MEAL_SLOT_EMOJIS, MEAL_SLOTS
+from config import MEAL_SLOT_EMOJIS, MEAL_SLOT_LABELS, MEAL_SLOTS
 from db.database import (
     decrypt_password,
     get_meal_entries,
@@ -44,9 +44,42 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     unsynced = await get_unsynced_entries(db, user_id)
     if unsynced:
-        lines.append(f"\n\u26A0 _{len(unsynced)} entries not synced._ Use /pending")
+        lines.append(
+            f"\n\u26A0 _{len(unsynced)} entries are stored locally and still missing in MFP._ Use /pending"
+        )
 
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
+async def _delete_best_matching_local_entry(
+    db,
+    user_id: int,
+    target_date: str,
+    latest: dict,
+) -> bool:
+    filters = [
+        ("food_name = ? AND slot = ? AND mfp_food_id = ?", (
+            latest["food_name"],
+            latest["slot"],
+            latest.get("mfp_food_id", ""),
+        )),
+        ("food_name = ? AND slot = ?", (latest["food_name"], latest["slot"])),
+        ("food_name = ?", (latest["food_name"],)),
+    ]
+
+    for where_clause, extra_params in filters:
+        cursor = await db.execute(
+            "DELETE FROM meals_history WHERE id = ("
+            "  SELECT id FROM meals_history"
+            f"  WHERE telegram_user_id = ? AND date = ? AND {where_clause}"
+            "  ORDER BY id DESC LIMIT 1"
+            ")",
+            (user_id, target_date, *extra_params),
+        )
+        if cursor.rowcount:
+            return True
+
+    return False
 
 
 async def undo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -64,7 +97,7 @@ async def undo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     if not entries:
-        await update.message.reply_text("\u2049 Nothing to undo for today.")
+        await update.message.reply_text("\u2049 Nothing to undo in MFP for today.")
         return
 
     latest = entries[0]
@@ -77,20 +110,16 @@ async def undo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     # Also remove from local DB if present
     db = context.bot_data["db"]
     user_id = update.effective_user.id
-    await db.execute(
-        "DELETE FROM meals_history WHERE id = ("
-        "  SELECT id FROM meals_history"
-        "  WHERE telegram_user_id = ? AND date = ? AND food_name = ?"
-        "  ORDER BY id DESC LIMIT 1"
-        ")",
-        (user_id, today.isoformat(), latest["food_name"]),
-    )
+    removed_local = await _delete_best_matching_local_entry(db, user_id, today.isoformat(), latest)
     await db.commit()
 
     emoji = MEAL_SLOT_EMOJIS.get(latest["slot"], "")
+    local_note = "Local history updated." if removed_local else "No matching local history entry was found."
     await update.message.reply_text(
-        f"\u21A9 *Removed from MFP:* {latest['food_name']}\n"
-        f"{emoji} {latest['meal_name']}",
+        f"\u21A9 *Removed the most recent MFP entry for today:*\n"
+        f"{latest['food_name']}\n"
+        f"{emoji} {latest['meal_name']}\n\n"
+        f"_{local_note}_",
         parse_mode="Markdown",
     )
 
@@ -115,13 +144,13 @@ async def retry_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if failed:
         error_lines = "\n".join(f"  • {e}" for e in errors[:5])
         await msg.edit_text(
-            f"\u26A0 Retry: *{synced}* synced, *{failed}* failed.\n\n{error_lines}",
+            f"\u26A0 Retry finished: *{synced}* synced to MFP, *{failed}* still local-only.\n\n{error_lines}",
             parse_mode="Markdown",
         )
     elif synced:
-        await msg.edit_text(f"\u2705 All *{synced}* entries synced!", parse_mode="Markdown")
+        await msg.edit_text(f"\u2705 All *{synced}* local-only entries are now synced to MFP.", parse_mode="Markdown")
     else:
-        await msg.edit_text("\u2705 Nothing to retry — all synced.")
+        await msg.edit_text("\u2705 Nothing to retry — MFP is already up to date.")
 
 
 async def macros_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -148,7 +177,7 @@ async def macros_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def copy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    from bot.daily import _ensure_client, _get_target_date, _send_macro_update, DAY_NAMES
+    from bot.daily import _ensure_client, _fetch_mfp_filled_slots, _get_target_date, _send_macro_update, DAY_NAMES
 
     client = await _ensure_client(update, context)
     if not client:
@@ -185,7 +214,7 @@ async def copy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(f"No meals found for {source_date.isoformat()}.")
         return
 
-    msg = await update.message.reply_text(f"Copying from {source_date.isoformat()}...")
+    msg = await update.message.reply_text(f"Copying from {source_date.isoformat()} into today...")
 
     from db.database import mark_entry_synced, save_meal_entry
     from db.models import MealEntry
@@ -195,13 +224,8 @@ async def copy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     skipped_slots = []
     slot_foods: dict[str, list[str]] = {}
 
-    # Pre-check which slots are already filled today (check once per slot)
-    already_filled: set[str] = set()
-    for entry in source_entries:
-        if entry.slot not in already_filled:
-            existing = await get_meal_entries(db, user_id, today.isoformat(), entry.slot)
-            if existing:
-                already_filled.add(entry.slot)
+    # MFP is the source of truth for whether today's slots are already filled.
+    already_filled = set((await _fetch_mfp_filled_slots(client, today)).keys())
 
     for entry in source_entries:
         if entry.slot in already_filled:
@@ -248,11 +272,16 @@ async def copy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         slot_foods.setdefault(entry.slot, []).append(entry.food_name)
         copied += 1
 
-    lines = [f"Copied {copied} entries from {source_date.isoformat()}:"]
+    if copied:
+        lines = [f"Copied {copied} entries from {source_date.isoformat()}:"]
+    else:
+        lines = [f"No entries copied from {source_date.isoformat()}."]
     for slot, foods in slot_foods.items():
-        lines.append(f"  {slot}: {', '.join(foods)}")
+        label = MEAL_SLOT_LABELS.get(slot, slot)
+        lines.append(f"  {label}: {', '.join(foods)}")
     if skipped_slots:
-        lines.append(f"  Skipped (already filled): {', '.join(skipped_slots)}")
+        skipped_labels = [MEAL_SLOT_LABELS.get(slot, slot) for slot in skipped_slots]
+        lines.append(f"  Skipped in MFP (already filled): {', '.join(skipped_labels)}")
     if failed_syncs:
         lines.append(f"  Saved locally only: {failed_syncs} entries failed MFP sync. Use /retry")
 
@@ -356,18 +385,19 @@ async def pending_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     entries = await get_unsynced_entries(db, user_id)
     if not entries:
-        await update.message.reply_text("\u2705 All synced! Nothing pending.")
+        await update.message.reply_text("\u2705 All synced! Nothing is waiting to be pushed to MFP.")
         return
 
-    lines = [f"\u23F3 *{len(entries)} pending entries:*\n"]
+    lines = [f"\u23F3 *{len(entries)} local-only entries still missing in MFP:*\n"]
     for e in entries[:15]:
         emoji = MEAL_SLOT_EMOJIS.get(e.slot, "")
-        lines.append(f"  {emoji} {e.date} {e.slot}: {e.food_name}")
+        label = MEAL_SLOT_LABELS.get(e.slot, e.slot)
+        lines.append(f"  {emoji} {e.date} {label}: {e.food_name}")
 
     if len(entries) > 15:
         lines.append(f"\n  _...+{len(entries) - 15} more_")
 
-    lines.append("\nUse /retry to sync, or /reset to clear all local data.")
+    lines.append("\nUse /retry to sync these entries to MFP, or /reset to clear all local data.")
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 

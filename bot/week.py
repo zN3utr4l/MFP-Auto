@@ -10,7 +10,6 @@ from bot.keyboards import stop_button
 from config import MEAL_SLOTS, WEEK_TIMEOUT_MINUTES
 from db.database import (
     get_active_week_progress,
-    get_meal_entries,
     save_week_progress,
     update_week_progress,
 )
@@ -59,7 +58,8 @@ async def week_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "current": resume_date,
         }
         await update.message.reply_text(
-            f"Resuming from {resume_date.isoformat()}...",
+            f"Resuming week plan from {resume_date.isoformat()}.\n"
+            "I'll skip days that are already filled in MFP.",
             reply_markup=stop_button(),
         )
         await _start_next_day(update, context)
@@ -82,7 +82,8 @@ async def week_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     }
 
     await update.message.reply_text(
-        f"\U0001F4C5 Week plan: {today.isoformat()} to {end_date.isoformat()}",
+        f"\U0001F4C5 Week plan: {today.isoformat()} to {end_date.isoformat()}\n"
+        "MFP is the source of truth, so filled days will be skipped automatically.",
         reply_markup=stop_button(),
     )
     await _start_next_day(update, context)
@@ -90,21 +91,20 @@ async def week_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def _start_next_day(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Find the next day that needs filling and start its flow."""
-    db = context.bot_data["db"]
-    user_id = update.effective_user.id
     week = context.user_data.get("week_mode", {})
+    client = context.user_data.get("mfp_client")
 
     current = week.get("current", date.today())
     end = week.get("end", date.today())
 
     while current <= end:
-        # Check if this day is already completely filled
-        all_filled = True
-        for slot in MEAL_SLOTS:
-            entries = await get_meal_entries(db, user_id, current.isoformat(), slot)
-            if not entries:
-                all_filled = False
-                break
+        # MFP is the source of truth for whether a day is already complete.
+        if client:
+            from bot.daily import _fetch_mfp_filled_slots
+            filled_slots = await _fetch_mfp_filled_slots(client, current)
+            all_filled = len(filled_slots) == len(MEAL_SLOTS)
+        else:
+            all_filled = False
 
         if not all_filled:
             week["current"] = current
@@ -155,7 +155,7 @@ async def week_stop_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await query.edit_message_text(
         f"\u23F9 Week plan paused at {week['current'].isoformat()}.\n"
-        "Use /week to resume."
+        "Use /week to resume from there."
     )
 
 
@@ -168,5 +168,5 @@ async def _complete_week(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data.pop("current_day", None)
 
     await update.effective_chat.send_message(
-        "\u2705 Week plan complete! All days have been processed."
+        "\u2705 Week plan complete! All days are already filled or have been processed."
     )

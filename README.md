@@ -28,7 +28,7 @@ Built for gym diet tracking — optimizes for hitting protein/carbs/fat targets.
 | `/copy yesterday` | Copy all meals from another day to today |
 | `/history` | 7-day macro adherence overview |
 | `/status` | Slots filled/pending per day |
-| `/undo` | Remove last logged entry |
+| `/undo` | Remove the latest food entry from MFP for today |
 | `/retry` | Retry failed MFP syncs |
 
 ## Getting Started (User)

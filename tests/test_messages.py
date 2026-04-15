@@ -18,6 +18,21 @@ def test_format_slot_high_confidence():
     assert "Banana" in msg
 
 
+def test_format_slot_high_confidence_shows_saved_unit():
+    prediction = {
+        "confidence": "high",
+        "top": {
+            "foods": ["Oats 80g"],
+            "mfp_ids": ["111"],
+            "pattern_id": 1,
+            "serving_info": [{"servings": 0.8, "unit": "g"}],
+        },
+        "alternatives": [],
+    }
+    msg = format_slot_message("breakfast", prediction)
+    assert "0.8 g" in msg
+
+
 def test_format_slot_low_confidence():
     prediction = {
         "confidence": "low",

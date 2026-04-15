@@ -128,7 +128,7 @@ async def setup_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if action == "setup_skip":
         context.user_data.pop("setup_search_slot", None)
         setup["slot_idx"] = setup.get("slot_idx", 0) + 1
-        await query.edit_message_text(f"Skipped {MEAL_SLOT_LABELS.get(slot, slot)}")
+        await query.edit_message_text(f"Skipped {MEAL_SLOT_LABELS.get(slot, slot)}.")
         await _ask_slot(update, context)
 
     elif action == "setup_pick":
@@ -182,7 +182,7 @@ async def setup_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
 
         amount = float(amount_str)
-        await query.edit_message_text("...")
+        await query.edit_message_text("Saving portion...")
         await _save_food_with_serving(update, context, slot, ss_index, amount)
 
     elif action == "setup_search_again":
@@ -195,7 +195,7 @@ async def setup_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         slot_foods = setup.get("foods", {}).get(slot, [])
         if slot_foods:
             names = ", ".join(f["name"] for f in slot_foods)
-            await query.edit_message_text(f"{MEAL_SLOT_LABELS.get(slot, slot)}: {names}")
+            await query.edit_message_text(f"{MEAL_SLOT_LABELS.get(slot, slot)} saved: {names}")
         await _ask_slot(update, context)
 
 
@@ -234,7 +234,7 @@ async def _save_food_with_serving(
         InlineKeyboardButton("Done with slot", callback_data=f"setup_next:{slot}"),
     ]])
 
-    unit = serving_info.get("serving_unit", "serving")
+    unit = serving_info.get("unit") or serving_info.get("serving_unit", "serving")
     await update.effective_chat.send_message(
         f"Added: {pending['name']} ({amount} {unit})\n"
         f"Current: {food_list}\n\n"

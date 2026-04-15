@@ -148,3 +148,21 @@ async def test_slot_callback_confirm_reports_sync_failure(db):
     query.edit_message_text.assert_awaited_once()
     assert "saved locally" in query.edit_message_text.await_args.args[0].lower()
     macro_update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_slot_callback_search_uses_slot_label(db):
+    update, query = _make_update("search:snacks:2026-04-14:flow9")
+    context = _make_context(db)
+    context.user_data["current_day"] = {
+        "date": "2026-04-14",
+        "flow_id": "flow9",
+        "all_predictions": {
+            "snacks": {"confidence": "none", "top": None, "alternatives": []},
+        },
+    }
+
+    await slot_callback(update, context)
+
+    query.edit_message_text.assert_awaited_once()
+    assert "Snacks" in query.edit_message_text.await_args.args[0]

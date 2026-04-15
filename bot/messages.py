@@ -26,8 +26,11 @@ def format_slot_message(slot: str, prediction: dict) -> str:
         si = prediction.get("top", {}).get("serving_info", {})
         if isinstance(si, list) and si:
             si = si[0]
-        if isinstance(si, dict) and si.get("servings") and si.get("serving_unit"):
-            qty = f" ({si['servings']} {si['serving_unit']})"
+        unit = None
+        if isinstance(si, dict):
+            unit = si.get("unit") or si.get("serving_unit")
+        if isinstance(si, dict) and si.get("servings") and unit:
+            qty = f" ({si['servings']} {unit})"
         else:
             qty = ""
         return f"{emoji} *{label}*\n{foods}{qty}"
