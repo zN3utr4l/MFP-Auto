@@ -13,12 +13,13 @@ MFP Auto Bot — a Telegram bot that automates meal logging on MyFitnessPal by l
 - curl_cffi >=0.15 (Chrome TLS impersonation for MFP API)
 - pandas >=2.2 for pattern analysis
 - aiosqlite >=0.21 for async SQLite
+- aiohttp >=3.9 for the Turso HTTP adapter
 - cryptography >=44.0 (Fernet encryption for stored MFP tokens)
 - lxml >=5.0
 
 ## Virtual Environment
 
-The project uses a local venv (`.venv/`). Always activate it before running anything:
+The project uses a local venv (`.venv/`). Activate it before running Python, pip or pytest:
 
 ```bash
 # Windows (Git Bash)
@@ -54,12 +55,12 @@ pytest -v
 Three layers, all async, orchestrated from `main.py`:
 
 1. **Bot Engine** (`bot/`) — Telegram handlers, inline keyboards, message formatting:
-   - `onboarding.py` — /start (step-by-step wizard), /token (auth with immediate message deletion)
+   - `onboarding.py` — /start (step-by-step wizard), /token (auth with immediate message deletion), /import (import range selection)
    - `setup.py` — /setup (register foods per slot with serving_size + quantity selection)
    - `daily.py` — /today, /tomorrow, /day (slot-by-slot with macro tracking after each confirm)
    - `week.py` — /week (7-day wizard with 30min timeout auto-stop, stop/resume)
    - `suggest.py` — /suggest (macro-aware food suggestions from user's pattern history)
-   - `utility.py` — /status, /undo, /retry, /macros, /copy, /history
+   - `utility.py` — /status, /undo, /retry, /macros, /copy, /history, /patterns, /analyze, /pending, /reset
    - `reminder.py` — daily 21:00 reminder for unfilled slots (JobQueue)
    - `keyboards.py` — inline button builders (slots, alternatives, serving sizes, quantities)
    - `messages.py` — formatting (slots, macros summary, history)
@@ -74,12 +75,12 @@ Three layers, all async, orchestrated from `main.py`:
    - `scraper.py` — date range import (rate-limited 1 req/sec)
    - `sync.py` — retry queue for failed MFP writes
 
-**Data layer** (`db/`) — aiosqlite with 4 tables: `users`, `meals_history`, `meal_patterns` (with serving_info), `week_progress`. Models as dataclasses in `models.py`.
+**Data layer** (`db/`) — 4 tables: `users`, `meals_history`, `meal_patterns` (with serving_info), `week_progress`. `get_db()` in `database.py` connects to Turso over HTTP (`turso_adapter.py`, aiohttp) when `TURSO_DB_URL` and `TURSO_AUTH_TOKEN` are set, as on Render, and to local SQLite via aiosqlite otherwise. Models as dataclasses in `models.py`.
 
 ## Key Design Decisions
 
 - MFP auth tokens are Fernet-encrypted in SQLite; `/token` message is deleted immediately
-- 7 meal slots (breakfast, morning_snack, lunch, afternoon_snack, pre_workout, post_workout, dinner) mapped to MFP meal_positions (0-3)
+- 4 meal slots (breakfast, lunch, dinner, snacks) mapped to MFP meal_positions 0-3 (`_SLOT_TO_MEAL_POSITION` in `mfp/client.py`)
 - Pattern decay: `weight * 0.95^(weeks_elapsed)`
 - Patterns store serving_info (serving_size_index, servings, unit, nutrition_multiplier)
 - Macro tracking after each confirm — reads goals from `v2/nutrient-goals`, totals from `v2/diary`
@@ -91,6 +92,10 @@ Three layers, all async, orchestrated from `main.py`:
 
 - `TELEGRAM_BOT_TOKEN` — from BotFather
 - `ENCRYPTION_KEY` — Fernet key for encrypting MFP tokens in DB
+- `TURSO_DB_URL`, `TURSO_AUTH_TOKEN` — Turso database; without both, the bot uses local SQLite
+- `DB_PATH` — local SQLite path (default `data/mfp_auto.db`)
+- `PORT` — health-check port (default 10000)
+- Integration tests only: `MFP_AUTH_JSON`, `TELEGRAM_TEST_CHAT_ID`
 
 ## Deployment
 
